@@ -1,6 +1,6 @@
 {
   "keepCount": 6,
   "intervalDays": 15,
-  "contextWindowTokens": 200000,
+  "contextWindowTokens": 1000000,
   "summarizeModel": "sonnet"
 }

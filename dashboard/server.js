@@ -22,7 +22,7 @@ const MAX_BODY_BYTES = 1024 * 1024; // 1MB — plenty for config/session-id payl
 const DEFAULT_CONFIG = {
   keepCount: 6,
   intervalDays: 15,
-  contextWindowTokens: 200000,
+  contextWindowTokens: 1000000,
   summarizeModel: 'sonnet',
 };
 
