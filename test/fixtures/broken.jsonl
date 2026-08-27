@@ -1,0 +1,5 @@
+not json at all
+{"type":"user","message":{"content":"missing cwd"}}
+
+{"type":"assistant","message":{"content":[{"type":"text","text":"partial"
+

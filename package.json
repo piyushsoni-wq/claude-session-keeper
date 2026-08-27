@@ -1,0 +1,15 @@
+{
+  "name": "claude-session-keeper",
+  "version": "0.1.0",
+  "description": "Backup, restore, and browse Claude Code session transcripts before Claude Code's own cleanup deletes them.",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "dashboard": "node dashboard/server.js"
+  },
+  "dependencies": {}
+}

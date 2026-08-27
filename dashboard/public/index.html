@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>claude-session-keeper</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>claude-session-keeper</h1>
+    <div id="cleanupBanner" class="banner" hidden></div>
+  </header>
+
+  <main>
+    <section class="card" id="statusCard">
+      <div class="card-header">
+        <h2>Backup status</h2>
+        <button id="backupNowBtn" class="btn primary">Run backup now</button>
+      </div>
+      <dl class="status-grid" id="statusGrid"></dl>
+      <div class="restore-row">
+        <button id="restoreMirrorBtn" class="btn">Restore from mirror</button>
+        <button id="restoreLatestBtn" class="btn">Restore latest snapshot</button>
+        <input id="restoreTarget" type="text" placeholder="optional target dir (default: live ~/.claude/projects)" />
+      </div>
+      <pre id="scriptOutput" class="script-output" hidden></pre>
+    </section>
+
+    <section class="card" id="sessionsCard">
+      <div class="card-header">
+        <h2>Live sessions</h2>
+        <button id="refreshSessionsBtn" class="btn">Refresh</button>
+      </div>
+      <table id="sessionsTable">
+        <thead>
+          <tr>
+            <th>Session</th>
+            <th>Directory</th>
+            <th>Last active</th>
+            <th>Context usage</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="sessionsBody"></tbody>
+      </table>
+    </section>
+
+    <section class="card" id="summariesCard">
+      <div class="card-header">
+        <h2>Resume-brief summaries</h2>
+        <button id="summarizeAllBtn" class="btn">Summarize all live sessions</button>
+      </div>
+      <input id="summarySearch" type="text" placeholder="search summaries…" />
+      <ul id="summariesList"></ul>
+      <div id="summaryDetail" class="summary-detail" hidden></div>
+    </section>
+
+    <section class="card" id="configCard">
+      <div class="card-header">
+        <h2>Config</h2>
+        <button id="saveConfigBtn" class="btn primary">Save</button>
+      </div>
+      <div class="config-grid">
+        <label>keepCount <input id="cfgKeepCount" type="number" min="1" /></label>
+        <label>intervalDays <input id="cfgIntervalDays" type="number" min="1" /></label>
+        <label>contextWindowTokens <input id="cfgContextWindow" type="number" min="1000" step="1000" /></label>
+        <label>summarizeModel <input id="cfgModel" type="text" /></label>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

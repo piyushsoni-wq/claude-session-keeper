@@ -1,0 +1,4 @@
+node_modules/
+*.log
+summaries/*.md
+summaries/index.json

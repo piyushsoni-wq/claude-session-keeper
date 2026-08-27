@@ -1,0 +1,6 @@
+{
+  "keepCount": 6,
+  "intervalDays": 15,
+  "contextWindowTokens": 200000,
+  "summarizeModel": "claude-opus-5"
+}
