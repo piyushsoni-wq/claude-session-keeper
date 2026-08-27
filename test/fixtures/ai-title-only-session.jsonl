@@ -1,0 +1,3 @@
+{"type":"user","cwd":"/Users/test/ai-title-project","message":{"content":"there is a bug in the widget"}}
+{"type":"ai-title","aiTitle":"Fix the widget bug","sessionId":"ai-title-only-session"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Looking into it."}],"usage":{"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}

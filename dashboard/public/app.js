@@ -1,249 +1,134 @@
 'use strict';
 
-async function fetchJson(url, options) {
+// Shared helpers used by every tab script (live-sessions.js, backups.js,
+// automation.js, summaries.js) — loaded first, exposes everything on
+// window.CSK. No framework, no build step: script tags execute in
+// document order, so by the time each tab script runs, window.CSK is
+// already populated.
+
+window.CSK = {};
+
+window.CSK.fetchJson = async function fetchJson(url, options) {
   const res = await fetch(url, options);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
   return data;
-}
+};
 
-function fmtBytes(n) {
+// User-controlled text (session titles, cwd paths) ends up interpolated
+// into innerHTML templates throughout the tab scripts — escape it first
+// so an oddly-titled session can't inject markup.
+window.CSK.escapeHtml = function escapeHtml(str) {
+  return String(str == null ? '' : str).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+};
+
+window.CSK.fmtBytes = function fmtBytes(n) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
+};
 
-function fmtAgo(mtimeMs) {
+window.CSK.fmtAgo = function fmtAgo(mtimeMs) {
   const mins = Math.floor((Date.now() - mtimeMs) / 60000);
+  if (mins < 1) return 'just now';
   if (mins < 60) return `${mins}m ago`;
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
-}
+};
 
-function showScriptOutput(result) {
-  const el = document.getElementById('scriptOutput');
-  el.hidden = false;
-  el.textContent = `exit ${result.code}\n${result.stdout}${result.stderr ? '\n--- stderr ---\n' + result.stderr : ''}`;
-}
+// Same threshold/estimate framing whether ago is null (unknown launchd
+// timestamp) or a real ISO string.
+window.CSK.fmtWhen = function fmtWhen(iso) {
+  if (!iso) return 'unknown';
+  return new Date(iso).toLocaleString();
+};
 
-// ---- Status ----
-
-async function loadStatus() {
-  const status = await fetchJson('/api/status');
-  const banner = document.getElementById('cleanupBanner');
-  if (status.cleanupPeriodDays <= 30) {
-    banner.hidden = false;
-    banner.textContent = `Claude Code deletes sessions after ${status.cleanupPeriodDays} days (mtime-based). Keep backups running.`;
-  } else {
-    banner.hidden = true;
-  }
-
-  const grid = document.getElementById('statusGrid');
-  grid.innerHTML = '';
-  const rows = [
-    ['Projects dir', status.projectsDir],
-    ['Cleanup period', `${status.cleanupPeriodDays} days`],
-    ['Backup root', status.backupRoot],
-    ['Mirror', status.mirrorExists ? 'present' : 'not yet created'],
-    ['Latest snapshot', status.latestSnapshot ? `${status.latestSnapshot.file} (${status.latestSnapshot.ageDays}d old)` : 'none yet'],
-  ];
-  for (const [label, value] of rows) {
-    const dt = document.createElement('dt');
-    dt.textContent = label;
-    const dd = document.createElement('dd');
-    dd.textContent = value;
-    grid.append(dt, dd);
-  }
-
-  document.getElementById('cfgKeepCount').value = status.config.keepCount;
-  document.getElementById('cfgIntervalDays').value = status.config.intervalDays;
-  document.getElementById('cfgContextWindow').value = status.config.contextWindowTokens;
-  document.getElementById('cfgModel').value = status.config.summarizeModel;
-}
-
-// ---- Sessions ----
-
-function usageBarHtml(session) {
+window.CSK.usageBarHtml = function usageBarHtml(session) {
   if (session.contextUnknown || session.contextRatio == null) {
     return '<span class="usage-bar"></span><span>unknown</span>';
   }
   const pct = Math.min(100, Math.round(session.contextRatio * 100));
   const cls = pct >= 85 ? 'danger' : pct >= 60 ? 'warn' : '';
   return `<span class="usage-bar"><span class="usage-bar-fill ${cls}" style="width:${pct}%"></span></span><span>${pct}%</span>`;
-}
+};
 
-async function loadSessions() {
-  const { sessions } = await fetchJson('/api/live-sessions');
-  const body = document.getElementById('sessionsBody');
-  body.innerHTML = '';
-  for (const s of sessions) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td><code>${s.sessionId.slice(0, 8)}</code></td>
-      <td class="cwd" title="${s.cwd || ''}">${s.cwd || '(unknown)'}</td>
-      <td>${fmtAgo(s.mtimeMs)} · ${fmtBytes(s.sizeBytes)}</td>
-      <td>${usageBarHtml(s)}</td>
-      <td></td>
-    `;
-    const actionsTd = tr.lastElementChild;
+window.CSK.titleCellHtml = function titleCellHtml(session) {
+  const esc = window.CSK.escapeHtml;
+  const title = session.title || `(untitled) ${session.sessionId.slice(0, 8)}`;
+  return `<span class="title">${esc(title)}</span><span class="id">${esc(session.sessionId.slice(0, 8))}</span>`;
+};
 
-    const openBtn = document.createElement('button');
-    openBtn.className = 'btn';
-    openBtn.textContent = 'Open';
-    openBtn.onclick = () => openSession(s.sessionId, openBtn);
+// ---- Pagination (shared by live sessions, mirror sessions, snapshots, summaries) ----
 
-    const sumBtn = document.createElement('button');
-    sumBtn.className = 'btn';
-    sumBtn.textContent = 'Summarize';
-    sumBtn.onclick = () => summarizeOne(s.sessionId, sumBtn);
+window.CSK.createPager = function createPager(pageSize) {
+  return { page: 1, pageSize, items: [] };
+};
 
-    actionsTd.append(openBtn, sumBtn);
-    body.appendChild(tr);
+window.CSK.pageSlice = function pageSlice(pager) {
+  const start = (pager.page - 1) * pager.pageSize;
+  return pager.items.slice(start, start + pager.pageSize);
+};
+
+window.CSK.totalPages = function totalPages(pager) {
+  return Math.max(1, Math.ceil(pager.items.length / pager.pageSize));
+};
+
+window.CSK.renderPagerControls = function renderPagerControls(el, pager, onChange) {
+  const total = pager.items.length;
+  el.innerHTML = '';
+  if (total === 0) {
+    const empty = document.createElement('span');
+    empty.className = 'pager-info';
+    empty.textContent = 'No items.';
+    el.appendChild(empty);
+    return;
   }
-}
+  const pages = window.CSK.totalPages(pager);
+  if (pager.page > pages) pager.page = pages;
+  const start = (pager.page - 1) * pager.pageSize + 1;
+  const end = Math.min(pager.page * pager.pageSize, total);
 
-async function openSession(sessionId, btn) {
-  btn.disabled = true;
-  try {
-    await fetchJson('/api/open-session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId }),
-    });
-  } catch (err) {
-    alert(err.message);
-  } finally {
-    btn.disabled = false;
-  }
-}
+  const info = document.createElement('span');
+  info.className = 'pager-info';
+  info.textContent = `Showing ${start}–${end} of ${total}`;
 
-// ---- Backup / restore ----
+  const prev = document.createElement('button');
+  prev.className = 'btn small';
+  prev.textContent = '‹ Prev';
+  prev.disabled = pager.page <= 1;
+  prev.onclick = () => { pager.page -= 1; onChange(); };
 
-async function runBackup() {
-  const btn = document.getElementById('backupNowBtn');
-  btn.disabled = true;
-  btn.textContent = 'Backing up…';
-  try {
-    const result = await fetchJson('/api/backup', { method: 'POST' });
-    showScriptOutput(result);
-    await loadStatus();
-  } catch (err) {
-    alert(err.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Run backup now';
-  }
-}
+  const pageLabel = document.createElement('span');
+  pageLabel.className = 'pager-info';
+  pageLabel.textContent = `Page ${pager.page} of ${pages}`;
 
-async function runRestore(body) {
-  const target = document.getElementById('restoreTarget').value.trim();
-  if (target) body.target = target;
-  try {
-    const result = await fetchJson('/api/restore', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    showScriptOutput(result);
-  } catch (err) {
-    alert(err.message);
-  }
-}
+  const next = document.createElement('button');
+  next.className = 'btn small';
+  next.textContent = 'Next ›';
+  next.disabled = pager.page >= pages;
+  next.onclick = () => { pager.page += 1; onChange(); };
 
-// ---- Config ----
+  el.append(info, prev, pageLabel, next);
+};
 
-async function saveConfig() {
-  const body = {
-    keepCount: Number(document.getElementById('cfgKeepCount').value),
-    intervalDays: Number(document.getElementById('cfgIntervalDays').value),
-    contextWindowTokens: Number(document.getElementById('cfgContextWindow').value),
-    summarizeModel: document.getElementById('cfgModel').value.trim(),
-  };
-  try {
-    await fetchJson('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    await loadStatus();
-  } catch (err) {
-    alert(err.message);
-  }
-}
+// ---- Tabs ----
 
-// ---- Summaries ----
+document.querySelectorAll('.tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
+  });
+});
 
-async function loadSummaries(query) {
-  const url = query ? `/api/summaries?q=${encodeURIComponent(query)}` : '/api/summaries';
-  const { summaries } = await fetchJson(url);
-  const list = document.getElementById('summariesList');
-  list.innerHTML = '';
-  for (const s of summaries) {
-    const li = document.createElement('li');
-    li.innerHTML = `<div>${s.sessionId.slice(0, 8)} — ${s.preview || '(empty)'}</div>
-      <div class="meta">${s.cwd || 'unknown dir'} · ${new Date(s.generatedAt).toLocaleString()}${s.truncated ? ' · truncated' : ''}</div>`;
-    li.onclick = () => showSummary(s.sessionId);
-    list.appendChild(li);
-  }
-}
+// ---- Cleanup-period banner (shared: shown regardless of which tab is active) ----
 
-async function showSummary(sessionId) {
-  const detail = document.getElementById('summaryDetail');
-  detail.hidden = false;
-  detail.textContent = 'Loading…';
-  try {
-    const { markdown } = await fetchJson(`/api/summaries?id=${encodeURIComponent(sessionId)}`);
-    detail.textContent = markdown;
-  } catch (err) {
-    detail.textContent = err.message;
-  }
-}
-
-async function summarizeOne(sessionId, btn) {
-  btn.disabled = true;
-  btn.textContent = '…';
-  try {
-    await fetchJson('/api/summarize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId }),
-    });
-    await loadSummaries(document.getElementById('summarySearch').value.trim());
-  } catch (err) {
-    alert(err.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Summarize';
-  }
-}
-
-async function summarizeAll() {
-  const btn = document.getElementById('summarizeAllBtn');
-  btn.disabled = true;
-  btn.textContent = 'Summarizing…';
-  try {
-    const result = await fetchJson('/api/summarize-all', { method: 'POST' });
-    alert(`Summarized ${result.succeeded}, failed ${result.failed}.`);
-    await loadSummaries();
-  } catch (err) {
-    alert(err.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'Summarize all live sessions';
-  }
-}
-
-// ---- Wiring ----
-
-document.getElementById('backupNowBtn').addEventListener('click', runBackup);
-document.getElementById('restoreMirrorBtn').addEventListener('click', () => runRestore({ mirror: true }));
-document.getElementById('restoreLatestBtn').addEventListener('click', () => runRestore({ latest: true }));
-document.getElementById('refreshSessionsBtn').addEventListener('click', loadSessions);
-document.getElementById('saveConfigBtn').addEventListener('click', saveConfig);
-document.getElementById('summarizeAllBtn').addEventListener('click', summarizeAll);
-document.getElementById('summarySearch').addEventListener('input', (e) => loadSummaries(e.target.value.trim()));
-
-loadStatus();
-loadSessions();
-loadSummaries();
+window.CSK.renderCleanupBanner = function renderCleanupBanner(cleanupPeriodDays) {
+  const banner = document.getElementById('cleanupBanner');
+  banner.hidden = false;
+  banner.textContent = `Claude Code deletes sessions after ${cleanupPeriodDays} days (mtime-based, checked on every startup). Keep backups running.`;
+};

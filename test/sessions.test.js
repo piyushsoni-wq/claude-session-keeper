@@ -8,8 +8,9 @@ const os = require('os');
 
 const {
   resolveSessionCwd,
+  resolveSessionTitle,
   estimateContextUsage,
-  readCleanupPeriodDays,
+  listSessionsInDir,
 } = require('../lib/sessions');
 
 const FIXTURES = path.join(__dirname, 'fixtures');
@@ -65,29 +66,49 @@ test('estimateContextUsage fails soft on broken/missing files', () => {
   });
 });
 
-test('readCleanupPeriodDays defaults to 30 when settings.json is absent', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'csk-settings-'));
-  const prev = process.env.CLAUDE_CONFIG_DIR;
-  process.env.CLAUDE_CONFIG_DIR = tmpDir;
-  try {
-    assert.equal(readCleanupPeriodDays(), 30);
-  } finally {
-    if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR;
-    else process.env.CLAUDE_CONFIG_DIR = prev;
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+test('resolveSessionTitle prefers customTitle over aiTitle', () => {
+  const title = resolveSessionTitle(path.join(FIXTURES, 'titled-session.jsonl'));
+  assert.equal(title, 'TWP-9999');
 });
 
-test('readCleanupPeriodDays reads a configured value', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'csk-settings-'));
-  fs.writeFileSync(path.join(tmpDir, 'settings.json'), JSON.stringify({ cleanupPeriodDays: 90 }));
-  const prev = process.env.CLAUDE_CONFIG_DIR;
-  process.env.CLAUDE_CONFIG_DIR = tmpDir;
-  try {
-    assert.equal(readCleanupPeriodDays(), 90);
-  } finally {
-    if (prev === undefined) delete process.env.CLAUDE_CONFIG_DIR;
-    else process.env.CLAUDE_CONFIG_DIR = prev;
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+test('resolveSessionTitle prefers the custom-title.json side-car file over an inline custom-title entry', () => {
+  const title = resolveSessionTitle(path.join(FIXTURES, 'sidecar-session.jsonl'));
+  assert.equal(title, 'TWP-4242');
+});
+
+test('resolveSessionTitle falls back to aiTitle when no customTitle', () => {
+  const title = resolveSessionTitle(path.join(FIXTURES, 'ai-title-only-session.jsonl'));
+  assert.equal(title, 'Fix the widget bug');
+});
+
+test('resolveSessionTitle falls back to a truncated first user message when no title entries exist', () => {
+  const title = resolveSessionTitle(path.join(FIXTURES, 'valid-session.jsonl'));
+  assert.equal(title, 'hi');
+});
+
+test('resolveSessionTitle returns null when nothing usable exists', () => {
+  const title = resolveSessionTitle(path.join(FIXTURES, 'empty.jsonl'));
+  assert.equal(title, null);
+});
+
+test('listSessionsInDir enumerates sessions from an arbitrary root (e.g. a mirror dir), sorted newest first', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'csk-listdir-'));
+  const projectDir = path.join(tmpDir, '-Users-test-project');
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.copyFileSync(path.join(FIXTURES, 'valid-session.jsonl'), path.join(projectDir, 'session-a.jsonl'));
+  fs.copyFileSync(path.join(FIXTURES, 'titled-session.jsonl'), path.join(projectDir, 'session-b.jsonl'));
+  const past = new Date(Date.now() - 60000);
+  fs.utimesSync(path.join(projectDir, 'session-a.jsonl'), past, past);
+
+  const sessions = listSessionsInDir(tmpDir, { contextWindowTokens: 200000 });
+  assert.equal(sessions.length, 2);
+  assert.equal(sessions[0].sessionId, 'session-b'); // newer mtime first
+  assert.equal(sessions[0].encodedProjectDir, '-Users-test-project');
+  assert.equal(sessions[1].sessionId, 'session-a');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('listSessionsInDir returns an empty list for a missing root', () => {
+  assert.deepEqual(listSessionsInDir(path.join(FIXTURES, 'does-not-exist-dir')), []);
 });

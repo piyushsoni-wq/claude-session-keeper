@@ -5,12 +5,16 @@
 
 const http = require('http');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 
 const sessions = require('../lib/sessions');
 const summarize = require('../lib/summarize');
 const summariesStore = require('../lib/summaries-store');
+const claudeSettings = require('../lib/claude-settings');
+const automation = require('../lib/automation');
+const backups = require('../lib/backups');
 const { shQuote, asQuote } = require('../lib/shell');
 
 const REPO_ROOT = path.join(__dirname, '..');
@@ -25,6 +29,10 @@ const DEFAULT_CONFIG = {
   contextWindowTokens: 1000000,
   summarizeModel: 'sonnet',
 };
+
+function getBackupRoot() {
+  return process.env.CLAUDE_SESSION_KEEPER_BACKUP_ROOT || path.join(os.homedir(), 'claude-session-keeper-backups');
+}
 
 function readConfig() {
   try {
@@ -86,6 +94,10 @@ const STATIC_FILES = {
   '/': { file: 'index.html', type: 'text/html; charset=utf-8' },
   '/style.css': { file: 'style.css', type: 'text/css; charset=utf-8' },
   '/app.js': { file: 'app.js', type: 'application/javascript; charset=utf-8' },
+  '/live-sessions.js': { file: 'live-sessions.js', type: 'application/javascript; charset=utf-8' },
+  '/backups.js': { file: 'backups.js', type: 'application/javascript; charset=utf-8' },
+  '/automation.js': { file: 'automation.js', type: 'application/javascript; charset=utf-8' },
+  '/summaries.js': { file: 'summaries.js', type: 'application/javascript; charset=utf-8' },
 };
 
 function serveStatic(res, pathname) {
@@ -103,9 +115,9 @@ function serveStatic(res, pathname) {
   return true;
 }
 
-function runScript(scriptName, args) {
+function runScript(scriptRelPath, args) {
   return new Promise((resolve) => {
-    const scriptPath = path.join(REPO_ROOT, scriptName);
+    const scriptPath = path.join(REPO_ROOT, scriptRelPath);
     execFile('bash', [scriptPath, ...args], { timeout: 10 * 60 * 1000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       resolve({
         ok: !err,
@@ -156,35 +168,41 @@ function openSessionInTerminal(cwd, sessionId) {
 
 async function handleApi(req, res, pathname, query) {
   const config = readConfig();
+  const backupRoot = getBackupRoot();
 
   if (pathname === '/api/status' && req.method === 'GET') {
-    const backupRoot = process.env.CLAUDE_SESSION_KEEPER_BACKUP_ROOT || path.join(require('os').homedir(), 'claude-session-keeper-backups');
-    const mirrorDir = path.join(backupRoot, 'mirror');
-    const snapshotDir = path.join(backupRoot, 'snapshots');
-    let latestSnapshot = null;
-    try {
-      const files = fs
-        .readdirSync(snapshotDir)
-        .filter((f) => f.startsWith('claude-sessions-') && f.endsWith('.tar.gz'))
-        .map((f) => ({ file: f, mtimeMs: fs.statSync(path.join(snapshotDir, f)).mtimeMs }))
-        .sort((a, b) => b.mtimeMs - a.mtimeMs);
-      if (files.length > 0) {
-        latestSnapshot = {
-          file: files[0].file,
-          ageDays: Math.floor((Date.now() - files[0].mtimeMs) / 86400000),
-        };
-      }
-    } catch {
-      // no snapshots yet
-    }
+    const mirrorDir = backups.mirrorDir(backupRoot);
+    const snapshots = backups.listSnapshots(backupRoot);
+    const latestSnapshot = snapshots.length > 0
+      ? { file: snapshots[0].file, ageDays: Math.floor((Date.now() - snapshots[0].mtimeMs) / 86400000) }
+      : null;
+
     sendJson(res, 200, {
       projectsDir: sessions.projectsDir(),
-      cleanupPeriodDays: sessions.readCleanupPeriodDays(),
+      cleanupPeriodDays: claudeSettings.readCleanupPeriodDays(),
       backupRoot,
       mirrorExists: fs.existsSync(mirrorDir),
       latestSnapshot,
+      automation: automation.getAutomationStatus(backupRoot, config.intervalDays),
       config,
     });
+    return;
+  }
+
+  if (pathname === '/api/cleanup-period' && req.method === 'POST') {
+    const body = await readJsonBody(req);
+    try {
+      const days = claudeSettings.writeCleanupPeriodDays(body.days);
+      sendJson(res, 200, { cleanupPeriodDays: days });
+    } catch (err) {
+      sendError(res, 400, err.message);
+    }
+    return;
+  }
+
+  if (pathname === '/api/automation/install' && req.method === 'POST') {
+    const result = await runScript('scripts/install-launchd.sh', []);
+    sendJson(res, result.ok ? 200 : 500, result);
     return;
   }
 
@@ -220,6 +238,27 @@ async function handleApi(req, res, pathname, query) {
     return;
   }
 
+  if (pathname === '/api/restore-session' && req.method === 'POST') {
+    const body = await readJsonBody(req);
+    const sessionId = body.sessionId;
+    if (!sessions.isSafeSessionId(sessionId)) {
+      sendError(res, 400, 'Invalid sessionId');
+      return;
+    }
+    let sourceArg;
+    if (body.source === 'mirror') {
+      sourceArg = 'mirror';
+    } else if (backups.SNAPSHOT_NAME_RE.test(String(body.source || ''))) {
+      sourceArg = path.join(backups.snapshotsDir(backupRoot), body.source);
+    } else {
+      sendError(res, 400, 'source must be "mirror" or a valid snapshot filename');
+      return;
+    }
+    const result = await runScript('restore.sh', ['--session', sessionId, '--source', sourceArg]);
+    sendJson(res, result.ok ? 200 : 500, result);
+    return;
+  }
+
   if (pathname === '/api/config' && req.method === 'POST') {
     const body = await readJsonBody(req);
     const allowed = ['keepCount', 'intervalDays', 'contextWindowTokens', 'summarizeModel'];
@@ -229,6 +268,67 @@ async function handleApi(req, res, pathname, query) {
     }
     const merged = writeConfig(partial);
     sendJson(res, 200, { config: merged });
+    return;
+  }
+
+  if (pathname === '/api/sessions/delete' && req.method === 'POST') {
+    const body = await readJsonBody(req);
+    const ids = Array.isArray(body.sessionIds) ? body.sessionIds : [];
+    const results = { succeeded: 0, failed: 0, errors: [] };
+    for (const id of ids) {
+      try {
+        sessions.deleteSessionIn(sessions.projectsDir(), id);
+        results.succeeded += 1;
+      } catch (err) {
+        results.failed += 1;
+        results.errors.push({ sessionId: id, error: err.message });
+      }
+    }
+    sendJson(res, 200, results);
+    return;
+  }
+
+  if (pathname === '/api/backups/mirror-sessions' && req.method === 'GET') {
+    const mirrorDir = backups.mirrorDir(backupRoot);
+    sendJson(res, 200, { sessions: sessions.listSessionsInDir(mirrorDir, { contextWindowTokens: config.contextWindowTokens }) });
+    return;
+  }
+
+  if (pathname === '/api/backups/snapshots' && req.method === 'GET') {
+    sendJson(res, 200, { snapshots: backups.listSnapshots(backupRoot) });
+    return;
+  }
+
+  if (pathname === '/api/backups/snapshot-sessions' && req.method === 'GET') {
+    const file = query.get('file');
+    const result = backups.listSnapshotSessions(backupRoot, String(file || ''));
+    if (result === null) {
+      sendError(res, 404, `Snapshot not found: ${file}`);
+      return;
+    }
+    sendJson(res, 200, { sessions: result });
+    return;
+  }
+
+  if (pathname === '/api/backups/delete-snapshot' && req.method === 'POST') {
+    const body = await readJsonBody(req);
+    try {
+      backups.deleteSnapshot(backupRoot, String(body.file || ''));
+      sendJson(res, 200, { ok: true });
+    } catch (err) {
+      sendError(res, 400, err.message);
+    }
+    return;
+  }
+
+  if (pathname === '/api/backups/delete-mirror-session' && req.method === 'POST') {
+    const body = await readJsonBody(req);
+    try {
+      backups.deleteMirrorSession(backupRoot, String(body.sessionId || ''));
+      sendJson(res, 200, { ok: true });
+    } catch (err) {
+      sendError(res, 400, err.message);
+    }
     return;
   }
 

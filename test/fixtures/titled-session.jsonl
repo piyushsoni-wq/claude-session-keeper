@@ -1,0 +1,4 @@
+{"type":"user","cwd":"/Users/test/titled-project","message":{"content":"help me with a ticket"}}
+{"type":"ai-title","aiTitle":"Investigate a ticket","sessionId":"titled-session"}
+{"type":"custom-title","customTitle":"TWP-9999","sessionId":"titled-session"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Sure, let's look."}],"usage":{"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}

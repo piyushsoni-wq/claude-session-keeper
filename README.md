@@ -71,6 +71,8 @@ Override the backup location with `CLAUDE_SESSION_KEEPER_BACKUP_ROOT`.
 ./restore.sh --latest              # restore from the newest dated snapshot
 ./restore.sh path/to/archive.tar.gz
 ./restore.sh --mirror --target /tmp/some-other-dir
+./restore.sh --session <id> --source mirror              # just one session
+./restore.sh --session <id> --source path/to/archive.tar.gz
 ```
 
 Restore only fills in files that are missing at the target
@@ -78,6 +80,15 @@ Restore only fills in files that are missing at the target
 makes it safe to run straight against the live `~/.claude/projects`, even
 with a Claude Code session currently open and appending to its own
 transcript file.
+
+**mtime is reset on restore, on purpose.** `rsync -a` preserves the
+source file's original modification time — a restored session would keep
+its old, already-cleanup-eligible mtime and just get deleted again by
+Claude Code's own cleanup on its next startup (confirmed with a real
+test, not assumed). So every file actually restored to the live
+`~/.claude/projects` gets its mtime reset to now. A `--target` override
+(restoring elsewhere to inspect/export) keeps the original timestamps,
+since that's a different use case.
 
 ### Automate it (macOS, launchd)
 
@@ -104,20 +115,42 @@ launchctl unload ~/Library/LaunchAgents/<old-label>.plist
 node dashboard/server.js   # or: npm run dashboard
 ```
 
-Open `http://localhost:4317`. Lets you:
+Open `http://localhost:4317`. Four tabs:
 
-- See live (not-yet-cleaned-up) sessions with an estimated context-window
-  usage %, and reopen one in Terminal (`claude --resume <id>`, `cd`'d into
-  the session's real original working directory first).
-- Trigger a backup, and restore from the mirror or the latest snapshot.
-- Generate and search resume-brief summaries, one at a time or in bulk.
-- Edit `config.json` (`keepCount`, `intervalDays`, `contextWindowTokens`,
-  `summarizeModel`).
+- **Live Sessions** — every session currently under `~/.claude/projects`,
+  by title (real session titles, not just UUIDs — see below), with an
+  estimated context-usage %, paginated. Open in Terminal
+  (`claude --resume <id>`, `cd`'d into the session's real original
+  working directory first), summarize one, or delete one/several
+  (multi-select + bulk delete, with a confirmation that warns if a
+  selected session was modified in the last 5 minutes).
+- **Backups** — run a backup on demand; browse every session currently in
+  the mirror (restore or delete individually); browse every dated
+  snapshot (not just the latest), drill into one to see exactly which
+  sessions it contains, restore a single session out of it, or delete
+  the whole snapshot.
+- **Automation & Settings** — whether the launchd job is actually loaded,
+  its run count/last exit code, and an *estimated* next-run time for
+  both the daily mirror sync and the next dated snapshot (launchd itself
+  exposes no scheduled-next-fire time for this kind of job — checked
+  directly). One-click install/reinstall. Edit Claude Code's own
+  `cleanupPeriodDays` (in `~/.claude/settings.json`, backed up before
+  every change) and this tool's own `config.json`.
+- **Summaries** — search generated resume-briefs, or trigger one/all.
+  "Summarize all" shows a confirmation naming the session count first,
+  since it's real usage against your plan.
 
 **"Open in Terminal" needs a macOS Automation permission grant** the
 first time it runs (System Settings → Privacy & Security → Automation →
 your terminal app → Terminal). If it fails, the dashboard surfaces that
 directly instead of a raw error.
+
+**Session titles**, shown instead of a raw UUID: Claude Code writes both
+an auto-generated `ai-title` and, if you've renamed a session, a
+`custom-title` (plus a `custom-title.json` side-car file, which wins if
+present — confirmed against real sessions, both sources agreed in every
+case checked). Falls back to a truncated first user message, then the
+short session id, if neither exists.
 
 ### Summarization
 
@@ -143,14 +176,30 @@ access. Model is configurable via `config.json`'s `summarizeModel`
   first parseable line — this is what "Open in Terminal" `cd`s into
   before `claude --resume`.
 - **Context-usage estimate:** `message.usage.input_tokens` is frequently a
-  streaming placeholder (often exactly `1`), not a final value. `lib/sessions.js`'s
-  `estimateContextUsage()` scans a session file from the end backward and
-  uses the first usage total that clears a 50-token noise threshold — a
-  heuristic, not exact.
+  streaming placeholder (often exactly `1`), not a final value. A single
+  forward pass over the file keeps *overwriting* "last qualifying usage
+  total" whenever a line clears a 50-token noise threshold — provably the
+  same result as scanning backward for the first qualifying line, without
+  a second pass. Default window is 1,000,000 tokens (current Sonnet
+  5/Opus 5-class models); lower `contextWindowTokens` in the dashboard's
+  Settings tab if you're pinned to a smaller-window model.
+- **launchd has no "next run" time.** `launchctl print` was checked
+  directly against the real loaded job — `state`/`runs`/`last exit
+  code`/`run interval` are exposed, nothing else. "Next run" in the
+  dashboard is computed from the last completed run (parsed from
+  `backup.log`, which logs ISO 8601 timestamps specifically so this
+  parses reliably — bash's default `date` output does not: `new
+  Date("Thu Aug 27 22:55:12 IST 2026")` is `Invalid Date`, confirmed) plus
+  the interval, and is presented as an estimate.
 - **Format stability:** the transcript format is internal to Claude Code
   and can change between releases. Every parser in this repo fails soft
   (skip the file / line, mark the field "unknown") rather than throwing —
   keep that pattern in anything you add.
+- **Path-traversal guards:** session ids and snapshot filenames arrive
+  from HTTP request bodies and get joined into filesystem paths (to open,
+  summarize, restore, or delete a file) — every entry point validates
+  the id/filename shape first (`lib/sessions.js`'s `isSafeSessionId`,
+  `lib/backups.js`'s `SNAPSHOT_NAME_RE`) before it's ever used in a path.
 
 ## Directory layout
 
@@ -162,13 +211,20 @@ claude-session-keeper/
 │   ├── com.user.claudesessionkeeper.plist.template
 │   └── install-launchd.sh
 ├── lib/
-│   ├── sessions.js                 # listLiveSessions, estimateContextUsage, resolveSessionCwd, readCleanupPeriodDays
+│   ├── sessions.js                 # analyzeSessionFile (single-pass: cwd/title/usage), listSessionsInDir, delete/find helpers
+│   ├── claude-settings.js          # ~/.claude/settings.json cleanupPeriodDays read/write (backed up, atomic write)
+│   ├── automation.js               # launchd status + "next run" estimates
+│   ├── backups.js                  # snapshot listing/contents/delete, mirror-session delete
 │   ├── shell.js                    # shQuote / asQuote — see test/shell.test.js before touching
 │   ├── summarize.js                # shells out to `claude -p`, resume-brief generation
 │   └── summaries-store.js          # flat markdown + JSON index, keyword search only
 ├── dashboard/
 │   ├── server.js                   # Node http, zero npm deps
 │   └── public/                     # vanilla JS/CSS, no framework, no build step
+│       ├── index.html              # tab shell: Live Sessions / Backups / Automation & Settings / Summaries
+│       ├── app.js                  # shared: fetchJson, pagination, tab switching
+│       ├── live-sessions.js / backups.js / automation.js / summaries.js  # one per tab
+│       └── style.css
 ├── summaries/                      # generated content, gitignored (dir tracked via .gitkeep)
 └── test/                           # node --test, zero deps
 ```

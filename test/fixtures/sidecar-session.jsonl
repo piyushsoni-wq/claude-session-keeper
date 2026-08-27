@@ -1,0 +1,3 @@
+{"type":"user","cwd":"/Users/test/sidecar-project","message":{"content":"rename this session please"}}
+{"type":"custom-title","customTitle":"OLD-INLINE-TITLE","sessionId":"sidecar-session"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Sure, renamed."}],"usage":{"input_tokens":100,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
