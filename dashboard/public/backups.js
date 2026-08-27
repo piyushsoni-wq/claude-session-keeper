@@ -9,7 +9,7 @@
 (function backupsTab() {
 const {
   icon, escapeHtml, fetchJson, fmtBytes, fmtAgo, createPager, pageSlice, renderPagerControls,
-  emptyState, renderCleanupBanner, hintHtml, loadingRow, loadingBlock, withLoading, withLoadingIcon,
+  emptyState, renderCleanupBanner, hintHtml, loadingRow, loadingBlock, withLoading, withLoadingIcon, tooltip,
 } = window.CSK;
 
 const sessionsPager = createPager(20);
@@ -26,13 +26,13 @@ function initStaticLabels() {
   document.getElementById('backupStatusHeading').innerHTML = `${icon('archive')} Backup status`;
   const backupNowBtn = document.getElementById('backupNowBtn');
   backupNowBtn.innerHTML = `${icon('refresh')} Run backup now`;
-  backupNowBtn.title = 'Mirror live sessions now, and cut a new dated snapshot if it\'s due';
+  tooltip(backupNowBtn, "Mirror live sessions now, and cut a new dated snapshot if it's due");
   document.getElementById('backupStatusHint').innerHTML = hintHtml('gear', `Mirrors <code>~/.claude/projects</code> now, and cuts a new dated snapshot if <code>intervalDays</code> has passed since the last one. The mirror only updates when a backup actually runs — this button, the daily automation, or at login — not continuously.`);
 
   document.getElementById('sessionsHeading').innerHTML = `${icon('search')} Sessions`;
   const refreshBtn = document.getElementById('refreshSessionsBtn');
   refreshBtn.innerHTML = `${icon('refresh')} Refresh`;
-  refreshBtn.title = 'Reload the sessions table';
+  tooltip(refreshBtn, 'Reload the sessions table');
   document.getElementById('sessionsHint').innerHTML = hintHtml('gear', 'Every session this tool knows about — live, mirrored, or only inside a snapshot — merged into one row per session. Badges show where each currently exists.');
 
   document.getElementById('snapshotsHeading').innerHTML = `${icon('archive')} Dated snapshots`;
@@ -40,12 +40,13 @@ function initStaticLabels() {
 
   const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
   bulkDeleteBtn.innerHTML = `${icon('delete')} Delete selected`;
-  bulkDeleteBtn.title = 'Delete every checked session from wherever it currently exists (live and/or mirror)';
+  tooltip(bulkDeleteBtn, 'Delete every checked session from wherever it currently exists (live and/or mirror)');
 
-  document.getElementById('selectAllSessions').title = 'Select every session on this page';
+  tooltip(document.getElementById('selectAllSessions'), 'Select every session on this page');
 
   const searchBox = document.querySelector('#tab-backups .search-box');
-  searchBox.innerHTML = `${icon('search', 14)}<input type="text" id="sessionsSearch" placeholder="search sessions… (also reveals hidden noise)" title="Also reveals sessions hidden by titleExcludePatterns" />`;
+  searchBox.innerHTML = `${icon('search', 14)}<input type="text" id="sessionsSearch" placeholder="search sessions… (also reveals hidden noise)" />`;
+  tooltip(document.getElementById('sessionsSearch'), 'Also reveals sessions hidden by titleExcludePatterns');
   document.getElementById('sessionsSearch').addEventListener('input', (e) => {
     currentSearch = e.target.value;
     applyFilterAndRender();
@@ -154,7 +155,7 @@ function usageCellHtml(row) {
 function actionBtn(iconName, label, onClick, extraClass) {
   const b = document.createElement('button');
   b.className = `btn ghost small${extraClass ? ` ${extraClass}` : ''}`;
-  b.title = label;
+  tooltip(b, label);
   b.innerHTML = icon(iconName);
   b.onclick = () => withLoadingIcon(b, onClick);
   return b;
@@ -176,9 +177,9 @@ function renderSessionsPage() {
     const label = row.title || `(untitled) ${row.sessionId.slice(0, 8)}`;
     const whenLabel = row.snapshotOnly ? `as of snapshot · ${fmtAgo(row.mtimeMs)}` : fmtAgo(row.mtimeMs);
     tr.innerHTML = `
-      <td class="checkbox-col"><input type="checkbox" class="row-select" title="Select this session" ${selectedIds.has(row.sessionId) ? 'checked' : ''} /></td>
+      <td class="checkbox-col"><input type="checkbox" class="row-select" data-tooltip="Select this session" ${selectedIds.has(row.sessionId) ? 'checked' : ''} /></td>
       <td class="title-cell"><span class="title">${escapeHtml(label)}</span><span class="id">${escapeHtml(row.sessionId.slice(0, 8))}</span></td>
-      <td class="cwd" title="${escapeHtml(row.cwd || '')}">${escapeHtml(row.cwd || '(unknown)')}</td>
+      <td class="cwd" data-tooltip="${escapeHtml(row.cwd || '')}">${escapeHtml(row.cwd || '(unknown)')}</td>
       <td>${whenLabel}${row.sizeBytes != null ? ` · ${fmtBytes(row.sizeBytes)}` : ''}</td>
       <td>${badgesHtml(row)}</td>
       <td>${usageCellHtml(row)}</td>
@@ -226,7 +227,7 @@ function updateBulkBar() {
   if (filteredCount > pageItems.length && !allFilteredSelected) {
     selectAllMatchingBtn.hidden = false;
     selectAllMatchingBtn.textContent = `Select all ${filteredCount} matching`;
-    selectAllMatchingBtn.title = 'Select every session matching the current search, not just this page';
+    tooltip(selectAllMatchingBtn, 'Select every session matching the current search, not just this page');
   } else {
     selectAllMatchingBtn.hidden = true;
   }
@@ -415,7 +416,7 @@ async function browseSnapshot(file) {
       const label = s.title || s.sessionId.slice(0, 8);
       tr.innerHTML = `
         <td>${escapeHtml(label)}</td>
-        <td class="cwd" title="${escapeHtml(s.cwd || '')}">${escapeHtml(s.cwd || '(unknown)')}</td>
+        <td class="cwd" data-tooltip="${escapeHtml(s.cwd || '')}">${escapeHtml(s.cwd || '(unknown)')}</td>
         <td class="actions"></td>
       `;
       tr.querySelector('.actions').appendChild(actionBtn('restore', 'Restore from this snapshot', () => restoreSession({

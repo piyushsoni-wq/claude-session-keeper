@@ -4,7 +4,7 @@
 // tags share one top-level scope, so each tab script needs its own
 // function scope to avoid colliding on names like `icon`.
 (function automationTab() {
-const { icon, escapeHtml, fetchJson, fmtWhen, renderCleanupBanner, hintHtml, loadingBlock, withLoading } = window.CSK;
+const { icon, escapeHtml, fetchJson, fmtWhen, renderCleanupBanner, hintHtml, loadingBlock, withLoading, tooltip } = window.CSK;
 
 function initStaticLabels() {
   document.getElementById('automationHeading').innerHTML = `${icon('power')} Automation`;
@@ -14,21 +14,21 @@ function initStaticLabels() {
   document.getElementById('cleanupHint').innerHTML = hintHtml('gear', `<code>cleanupPeriodDays</code> in <code>~/.claude/settings.json</code> — Claude Code's own setting for how old a session can get before it deletes it on startup. Raising this doesn't replace backups: real Claude Code GitHub issues report cleanup sometimes deleting sessions <em>newer</em> than configured; an unbounded period means unbounded local disk growth with no compression; and it only guards Claude Code's own automatic sweep, not you or a script accidentally deleting a project folder. This edits the file directly — a timestamped backup is kept before every change.`);
   const saveCleanupBtn = document.getElementById('saveCleanupPeriodBtn');
   saveCleanupBtn.innerHTML = `${icon('check')} Save`;
-  saveCleanupBtn.title = 'Write this value to ~/.claude/settings.json (a backup is kept first)';
+  tooltip(saveCleanupBtn, 'Write this value to ~/.claude/settings.json (a backup is kept first)');
 
   document.getElementById('configHeading').innerHTML = `${icon('gear')} Config`;
   document.getElementById('configHint').innerHTML = hintHtml('gear', `This tool's own settings (<code>config.json</code>), separate from Claude Code's settings above. Worth knowing: backups currently live on this same disk — they protect against Claude Code's cleanup and human error, not disk failure or a lost machine.`);
   const saveConfigBtn = document.getElementById('saveConfigBtn');
   saveConfigBtn.innerHTML = `${icon('check')} Save`;
-  saveConfigBtn.title = 'Write these values to config.json';
+  tooltip(saveConfigBtn, 'Write these values to config.json');
 
   const installBtn = document.getElementById('installAutomationBtn');
   installBtn.innerHTML = `${icon('power')} Install / start`;
-  installBtn.title = 'Load the scheduled backup job and run it once to verify';
+  tooltip(installBtn, 'Load the scheduled backup job and run it once to verify');
 
   const stopBtn = document.getElementById('stopAutomationBtn');
   stopBtn.innerHTML = `${icon('power')} Stop`;
-  stopBtn.title = 'Unload the scheduled backup job — stays installed, restart any time';
+  tooltip(stopBtn, 'Unload the scheduled backup job — stays installed, restart any time');
 }
 
 function showAutomationOutput(result) {

@@ -84,8 +84,17 @@ flowchart LR
 Click **Continue** on any session — even one that only exists in a
 snapshot — and it asks Claude to write a short summary of what that
 session was about, then opens a brand-new terminal in the same project
-folder with that summary as the first message. The old session is never
-touched or deleted.
+folder with that summary as the first message. The old session's file
+itself is never touched, moved, or deleted — but the new session only
+gets that short summary, **not** the full original conversation. That's
+a real tradeoff, not a bug: Continue exists for when a session's context
+window is already nearly full, so resuming the *entire* history isn't
+really an option anyway — it'd just fill the window right back up.
+
+If you want the exact original conversation back with nothing lost,
+that's **Restore** (copies the real file into `~/.claude/projects`, does
+not overwrite anything already there) followed by **Open** (`claude
+--resume`) — not Continue.
 
 ## Requirements
 

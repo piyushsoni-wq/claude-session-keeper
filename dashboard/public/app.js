@@ -68,6 +68,16 @@ window.CSK.icon = function icon(name, size) {
   return `<svg class="icon" width="${px}" height="${px}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 };
 
+// Sets the custom CSS tooltip (see [data-tooltip] in style.css) instead
+// of the native `title` attribute — reported directly as not visible
+// (native tooltips are slow and inconsistent across browsers). Also sets
+// aria-label so screen readers still get the explanation.
+window.CSK.tooltip = function tooltip(el, text) {
+  el.dataset.tooltip = text;
+  el.setAttribute('aria-label', text);
+  return el;
+};
+
 // ---- Pagination (shared across every list) ----
 
 window.CSK.createPager = function createPager(pageSize) {
@@ -98,7 +108,7 @@ window.CSK.renderPagerControls = function renderPagerControls(el, pager, onChang
 
   const prev = document.createElement('button');
   prev.className = 'btn ghost small';
-  prev.title = 'Previous page';
+  window.CSK.tooltip(prev, 'Previous page');
   prev.innerHTML = window.CSK.icon('chevron').replace('viewBox="0 0 16 16"', 'viewBox="0 0 16 16" style="transform:rotate(180deg)"');
   prev.disabled = pager.page <= 1;
   prev.onclick = () => { pager.page -= 1; onChange(); };
@@ -109,7 +119,7 @@ window.CSK.renderPagerControls = function renderPagerControls(el, pager, onChang
 
   const next = document.createElement('button');
   next.className = 'btn ghost small';
-  next.title = 'Next page';
+  window.CSK.tooltip(next, 'Next page');
   next.innerHTML = window.CSK.icon('chevron');
   next.disabled = pager.page >= pages;
   next.onclick = () => { pager.page += 1; onChange(); };
