@@ -1,0 +1,4 @@
+{"type":"user","cwd":"/Users/test/tool-project","message":{"content":"Fix the bug in auth.js"}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Let me look at the file."},{"type":"tool_use","id":"toolu_1","name":"Read","input":{"file_path":"auth.js"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"...file contents..."}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Found it, fixed the null check."}]}}

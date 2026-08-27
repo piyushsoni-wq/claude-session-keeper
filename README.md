@@ -38,9 +38,9 @@ later."
 
 ## Setup
 
-Requires Node.js >= 18 (for global `fetch`) and no npm install — this repo
-has zero dependencies on purpose, both for the backup/restore scripts and
-the dashboard server.
+Requires Node.js >= 18 and the `claude` CLI on your `PATH` (for
+summarization) — no npm install needed, this repo has zero dependencies
+on purpose, both for the backup/restore scripts and the dashboard server.
 
 ```bash
 git clone <this-repo>
@@ -121,15 +121,16 @@ directly instead of a raw error.
 
 ### Summarization
 
-Needs your own `ANTHROPIC_API_KEY` set in the environment — never read
-from `config.json` or written to disk. Uses the Claude API directly (raw
-`fetch`, no SDK, to keep this repo dependency-free); model is
-configurable via `config.json`'s `summarizeModel` (default:
-`claude-opus-5`).
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
+Needs no API key. Summarization shells out to your local `claude` CLI in
+headless mode (`claude -p ... --output-format json`), which authenticates
+however your interactive `claude` sessions already do (OAuth/keychain,
+enterprise SSO, whatever your plan uses) — no `ANTHROPIC_API_KEY` required
+and none is ever read. Each call passes `--no-session-persistence` so
+summarizing a session doesn't itself create a new session transcript, and
+`--tools ""` so it's a pure text-in/text-out call with no file/bash
+access. Model is configurable via `config.json`'s `summarizeModel`
+(default: `sonnet` — accepts a `claude` CLI model alias like `sonnet` /
+`opus`, or a full model name).
 
 ## How it works
 
@@ -163,7 +164,7 @@ claude-session-keeper/
 ├── lib/
 │   ├── sessions.js                 # listLiveSessions, estimateContextUsage, resolveSessionCwd, readCleanupPeriodDays
 │   ├── shell.js                    # shQuote / asQuote — see test/shell.test.js before touching
-│   ├── summarize.js                # Claude API call, resume-brief generation
+│   ├── summarize.js                # shells out to `claude -p`, resume-brief generation
 │   └── summaries-store.js          # flat markdown + JSON index, keyword search only
 ├── dashboard/
 │   ├── server.js                   # Node http, zero npm deps

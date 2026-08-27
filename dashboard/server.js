@@ -23,7 +23,7 @@ const DEFAULT_CONFIG = {
   keepCount: 6,
   intervalDays: 15,
   contextWindowTokens: 200000,
-  summarizeModel: 'claude-opus-5',
+  summarizeModel: 'sonnet',
 };
 
 function readConfig() {
@@ -246,30 +246,24 @@ async function handleApi(req, res, pathname, query) {
     }
     try {
       const { markdown, truncated, cwd } = await summarize.summarizeSession(filePath, {
-        apiKey: process.env.ANTHROPIC_API_KEY,
         model: config.summarizeModel,
       });
       const entry = summariesStore.saveSummary(REPO_ROOT, { sessionId, cwd, markdown, truncated });
       sendJson(res, 200, { entry, markdown, truncated });
     } catch (err) {
-      sendError(res, err.code === 'NO_API_KEY' ? 400 : 502, err.message);
+      sendError(res, 502, err.message);
     }
     return;
   }
 
   if (pathname === '/api/summarize-all' && req.method === 'POST') {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      sendError(res, 400, 'ANTHROPIC_API_KEY not set — required to summarize sessions');
-      return;
-    }
     const live = sessions.listLiveSessions(config.contextWindowTokens);
     const results = { succeeded: 0, failed: 0, errors: [] };
-    // Sequential on purpose — avoids hammering the API with dozens of
-    // concurrent requests against a personal key's rate limit.
+    // Sequential on purpose — runs dozens of `claude -p` child processes
+    // one at a time rather than hammering the plan's rate limit at once.
     for (const s of live) {
       try {
         const { markdown, truncated, cwd } = await summarize.summarizeSession(s.filePath, {
-          apiKey: process.env.ANTHROPIC_API_KEY,
           model: config.summarizeModel,
         });
         summariesStore.saveSummary(REPO_ROOT, { sessionId: s.sessionId, cwd: cwd || s.cwd, markdown, truncated });
