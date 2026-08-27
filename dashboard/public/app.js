@@ -98,6 +98,7 @@ window.CSK.renderPagerControls = function renderPagerControls(el, pager, onChang
 
   const prev = document.createElement('button');
   prev.className = 'btn ghost small';
+  prev.title = 'Previous page';
   prev.innerHTML = window.CSK.icon('chevron').replace('viewBox="0 0 16 16"', 'viewBox="0 0 16 16" style="transform:rotate(180deg)"');
   prev.disabled = pager.page <= 1;
   prev.onclick = () => { pager.page -= 1; onChange(); };
@@ -108,6 +109,7 @@ window.CSK.renderPagerControls = function renderPagerControls(el, pager, onChang
 
   const next = document.createElement('button');
   next.className = 'btn ghost small';
+  next.title = 'Next page';
   next.innerHTML = window.CSK.icon('chevron');
   next.disabled = pager.page >= pages;
   next.onclick = () => { pager.page += 1; onChange(); };

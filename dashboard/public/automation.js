@@ -12,14 +12,23 @@ function initStaticLabels() {
 
   document.getElementById('cleanupHeading').innerHTML = `${icon('gear')} Cleanup period`;
   document.getElementById('cleanupHint').innerHTML = hintHtml('gear', `<code>cleanupPeriodDays</code> in <code>~/.claude/settings.json</code> — Claude Code's own setting for how old a session can get before it deletes it on startup. Raising this doesn't replace backups: real Claude Code GitHub issues report cleanup sometimes deleting sessions <em>newer</em> than configured; an unbounded period means unbounded local disk growth with no compression; and it only guards Claude Code's own automatic sweep, not you or a script accidentally deleting a project folder. This edits the file directly — a timestamped backup is kept before every change.`);
-  document.getElementById('saveCleanupPeriodBtn').innerHTML = `${icon('check')} Save`;
+  const saveCleanupBtn = document.getElementById('saveCleanupPeriodBtn');
+  saveCleanupBtn.innerHTML = `${icon('check')} Save`;
+  saveCleanupBtn.title = 'Write this value to ~/.claude/settings.json (a backup is kept first)';
 
   document.getElementById('configHeading').innerHTML = `${icon('gear')} Config`;
   document.getElementById('configHint').innerHTML = hintHtml('gear', `This tool's own settings (<code>config.json</code>), separate from Claude Code's settings above. Worth knowing: backups currently live on this same disk — they protect against Claude Code's cleanup and human error, not disk failure or a lost machine.`);
-  document.getElementById('saveConfigBtn').innerHTML = `${icon('check')} Save`;
+  const saveConfigBtn = document.getElementById('saveConfigBtn');
+  saveConfigBtn.innerHTML = `${icon('check')} Save`;
+  saveConfigBtn.title = 'Write these values to config.json';
 
-  document.getElementById('installAutomationBtn').innerHTML = `${icon('power')} Install / start`;
-  document.getElementById('stopAutomationBtn').innerHTML = `${icon('power')} Stop`;
+  const installBtn = document.getElementById('installAutomationBtn');
+  installBtn.innerHTML = `${icon('power')} Install / start`;
+  installBtn.title = 'Load the scheduled backup job and run it once to verify';
+
+  const stopBtn = document.getElementById('stopAutomationBtn');
+  stopBtn.innerHTML = `${icon('power')} Stop`;
+  stopBtn.title = 'Unload the scheduled backup job — stays installed, restart any time';
 }
 
 function showAutomationOutput(result) {

@@ -24,20 +24,28 @@ let currentSearch = '';
 
 function initStaticLabels() {
   document.getElementById('backupStatusHeading').innerHTML = `${icon('archive')} Backup status`;
-  document.getElementById('backupNowBtn').innerHTML = `${icon('refresh')} Run backup now`;
+  const backupNowBtn = document.getElementById('backupNowBtn');
+  backupNowBtn.innerHTML = `${icon('refresh')} Run backup now`;
+  backupNowBtn.title = 'Mirror live sessions now, and cut a new dated snapshot if it\'s due';
   document.getElementById('backupStatusHint').innerHTML = hintHtml('gear', `Mirrors <code>~/.claude/projects</code> now, and cuts a new dated snapshot if <code>intervalDays</code> has passed since the last one. The mirror only updates when a backup actually runs — this button, the daily automation, or at login — not continuously.`);
 
   document.getElementById('sessionsHeading').innerHTML = `${icon('search')} Sessions`;
-  document.getElementById('refreshSessionsBtn').innerHTML = `${icon('refresh')} Refresh`;
+  const refreshBtn = document.getElementById('refreshSessionsBtn');
+  refreshBtn.innerHTML = `${icon('refresh')} Refresh`;
+  refreshBtn.title = 'Reload the sessions table';
   document.getElementById('sessionsHint').innerHTML = hintHtml('gear', 'Every session this tool knows about — live, mirrored, or only inside a snapshot — merged into one row per session. Badges show where each currently exists.');
 
   document.getElementById('snapshotsHeading').innerHTML = `${icon('archive')} Dated snapshots`;
   document.getElementById('snapshotsHint').innerHTML = hintHtml('gear', 'Immutable point-in-time archives, kept up to <code>keepCount</code> of them. Deleting a session from the mirror never removes it from a snapshot that already captured it.');
 
-  document.getElementById('bulkDeleteBtn').innerHTML = `${icon('delete')} Delete selected`;
+  const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+  bulkDeleteBtn.innerHTML = `${icon('delete')} Delete selected`;
+  bulkDeleteBtn.title = 'Delete every checked session from wherever it currently exists (live and/or mirror)';
+
+  document.getElementById('selectAllSessions').title = 'Select every session on this page';
 
   const searchBox = document.querySelector('#tab-backups .search-box');
-  searchBox.innerHTML = `${icon('search', 14)}<input type="text" id="sessionsSearch" placeholder="search sessions… (also reveals hidden noise)" />`;
+  searchBox.innerHTML = `${icon('search', 14)}<input type="text" id="sessionsSearch" placeholder="search sessions… (also reveals hidden noise)" title="Also reveals sessions hidden by titleExcludePatterns" />`;
   document.getElementById('sessionsSearch').addEventListener('input', (e) => {
     currentSearch = e.target.value;
     applyFilterAndRender();
@@ -168,7 +176,7 @@ function renderSessionsPage() {
     const label = row.title || `(untitled) ${row.sessionId.slice(0, 8)}`;
     const whenLabel = row.snapshotOnly ? `as of snapshot · ${fmtAgo(row.mtimeMs)}` : fmtAgo(row.mtimeMs);
     tr.innerHTML = `
-      <td class="checkbox-col"><input type="checkbox" class="row-select" ${selectedIds.has(row.sessionId) ? 'checked' : ''} /></td>
+      <td class="checkbox-col"><input type="checkbox" class="row-select" title="Select this session" ${selectedIds.has(row.sessionId) ? 'checked' : ''} /></td>
       <td class="title-cell"><span class="title">${escapeHtml(label)}</span><span class="id">${escapeHtml(row.sessionId.slice(0, 8))}</span></td>
       <td class="cwd" title="${escapeHtml(row.cwd || '')}">${escapeHtml(row.cwd || '(unknown)')}</td>
       <td>${whenLabel}${row.sizeBytes != null ? ` · ${fmtBytes(row.sizeBytes)}` : ''}</td>
@@ -218,6 +226,7 @@ function updateBulkBar() {
   if (filteredCount > pageItems.length && !allFilteredSelected) {
     selectAllMatchingBtn.hidden = false;
     selectAllMatchingBtn.textContent = `Select all ${filteredCount} matching`;
+    selectAllMatchingBtn.title = 'Select every session matching the current search, not just this page';
   } else {
     selectAllMatchingBtn.hidden = true;
   }

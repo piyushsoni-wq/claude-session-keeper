@@ -38,6 +38,14 @@
 
 * { box-sizing: border-box; }
 
+/* The browser's default [hidden] { display: none } rule and an authored
+   rule like `.btn { display: inline-flex }` have equal specificity — the
+   later one (ours) wins the cascade, so toggling .hidden on a `.btn`
+   silently did nothing (confirmed: Install/start and Stop showed at the
+   same time, since neither button ever actually hid). `hidden` is meant
+   to be an authoritative "don't show this," so it should always win. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
