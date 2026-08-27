@@ -4,6 +4,16 @@ Claude Code deletes your old session transcripts after 30 days (by
 default). This backs them up first, and gives you a small local
 dashboard to browse, restore, and pick old sessions back up.
 
+## Run it
+
+```bash
+cd claude-session-keeper
+node dashboard/server.js
+```
+
+Then open **http://localhost:4317** in your browser. No npm install, no
+build step.
+
 ![Backups tab](docs/screenshot-backups.png)
 
 ## Why this exists
@@ -38,15 +48,14 @@ freezes a compressed, dated snapshot that's never touched again. The
 dashboard reads all three and merges them into one table, so you can see
 every session you have a copy of and restore, rename, or delete it.
 
-## Quick start
+## Setup
+
+Requires Node.js 18+ and the `claude` CLI on your `PATH`. Clone it, then
+see "Run it" above.
 
 ```bash
 git clone <this-repo>
-cd claude-session-keeper
-node dashboard/server.js
 ```
-
-Open `http://localhost:4317`. That's it — no npm install, no build step.
 
 Set up daily automatic backups:
 

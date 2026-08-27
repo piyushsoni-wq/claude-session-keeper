@@ -1,0 +1,750 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>claude-session-keeper — Technical Report</title>
+<style>
+  @page { size: A4; margin: 22mm 18mm 20mm 18mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 10.3pt;
+    line-height: 1.55;
+    color: #1a1d21;
+    margin: 0;
+  }
+  .cover {
+    height: 245mm;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    page-break-after: always;
+  }
+  .cover .kicker {
+    font-size: 11pt;
+    color: #d97757;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  .cover h1 {
+    font-size: 30pt;
+    margin: 0 0 10px;
+    line-height: 1.15;
+  }
+  .cover .sub {
+    font-size: 13pt;
+    color: #4b5563;
+    max-width: 480px;
+    margin-bottom: 40px;
+  }
+  .cover .meta {
+    font-size: 9.5pt;
+    color: #6b7280;
+    border-top: 1px solid #e1e4e8;
+    padding-top: 14px;
+    max-width: 480px;
+  }
+  .cover .meta div { margin-bottom: 4px; }
+
+  h1 { font-size: 18pt; margin: 0 0 6px; }
+  h2 {
+    font-size: 14pt;
+    margin: 22px 0 8px;
+    padding-bottom: 5px;
+    border-bottom: 2px solid #d97757;
+    page-break-after: avoid;
+  }
+  h3 {
+    font-size: 11.5pt;
+    margin: 16px 0 6px;
+    color: #b8461f;
+    page-break-after: avoid;
+  }
+  h4 {
+    font-size: 10.3pt;
+    margin: 12px 0 4px;
+    page-break-after: avoid;
+  }
+  p { margin: 0 0 8px; }
+  ul, ol { margin: 0 0 10px; padding-left: 18px; }
+  li { margin-bottom: 3px; }
+  section { page-break-before: always; }
+  section.no-break { page-break-before: auto; }
+
+  code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 9pt;
+    background: #f4f5f7;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  pre {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 8.6pt;
+    background: #1c1e22;
+    color: #e8e9eb;
+    padding: 10px 12px;
+    border-radius: 6px;
+    overflow-x: auto;
+    line-height: 1.45;
+    margin: 8px 0 12px;
+    page-break-inside: avoid;
+  }
+  pre code { background: none; padding: 0; color: inherit; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0 14px;
+    font-size: 9pt;
+    page-break-inside: avoid;
+  }
+  th, td {
+    border: 1px solid #e1e4e8;
+    padding: 5px 8px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #f4f5f7; font-weight: 600; }
+  tr:nth-child(even) td { background: #fafafa; }
+
+  .callout {
+    background: #fdf0e3;
+    border: 1px solid #e8b98a;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin: 10px 0;
+    font-size: 9.5pt;
+    page-break-inside: avoid;
+  }
+  .callout .label {
+    font-weight: 700;
+    color: #b8461f;
+    display: block;
+    margin-bottom: 3px;
+  }
+  .bug {
+    background: #fbeae7;
+    border: 1px solid #e8a89a;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin: 10px 0;
+    font-size: 9.5pt;
+    page-break-inside: avoid;
+  }
+  .bug .label {
+    font-weight: 700;
+    color: #a5301f;
+    display: block;
+    margin-bottom: 3px;
+  }
+  .diagram {
+    text-align: center;
+    margin: 12px 0 16px;
+    page-break-inside: avoid;
+  }
+  .diagram img { max-width: 100%; max-height: 260px; }
+  .diagram .cap { font-size: 8.5pt; color: #6b7280; margin-top: 4px; }
+
+  .toc { font-size: 10pt; }
+  .toc ol { list-style: none; padding-left: 0; }
+  .toc li { margin-bottom: 6px; }
+  .toc .num { color: #d97757; font-weight: 700; margin-right: 6px; }
+  .file { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 9pt; color: #4b5563; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="kicker">Technical Report</div>
+  <h1>claude-session-keeper</h1>
+  <div class="sub">Architecture, design decisions, and current flexibility — a
+  from-the-ground-up backup, restore, and recall tool for Claude Code session
+  transcripts, built as a zero-dependency Node.js dashboard over plain bash.</div>
+  <div class="meta">
+    <div>Prepared for: engineers picking up or extending this codebase</div>
+    <div>Scope: v1 → v3 (backup/restore core, dashboard rebuild, unified session
+    view, Continue feature, UI polish)</div>
+    <div>Companion docs: <span class="file">README.md</span> (user-facing quick start)</div>
+  </div>
+</div>
+
+<section class="no-break">
+<h1>1. What this is, in one page</h1>
+
+<p><strong>Problem.</strong> Claude Code deletes session transcripts under
+<span class="file">~/.claude/projects/</span> once they're older than
+<code>cleanupPeriodDays</code> (default 30), based on file mtime, checked on
+every startup. Real GitHub issues report this cleanup misbehaving — deleting
+sessions newer than configured, leaving orphaned sidebar entries. Raising the
+retention number is not a real fix: it only governs Claude Code's own sweep,
+not a human or script deleting a project folder, and it doesn't compress
+anything, so the live directory just grows forever.</p>
+
+<p><strong>Approach.</strong> A three-tier data model — <strong>live</strong>
+sessions (Claude Code's own directory, unmodified), a <strong>mirror</strong>
+(a live-updating rsync copy), and <strong>dated snapshots</strong> (immutable,
+compressed, point-in-time archives) — plus a small local dashboard that reads
+all three and presents them as one thing: every session you have a copy of,
+searchable, restorable, renameable, deletable, and — the newest feature —
+resumable into a fresh session via an AI-written summary when the original's
+context window is already full.</p>
+
+<div class="diagram">
+  <img src="diagram-architecture.png" alt="Architecture diagram" />
+  <div class="cap">Fig. 1 — live/mirror/snapshot data flow, and where the dashboard sits</div>
+</div>
+
+<p><strong>Build philosophy.</strong> Zero npm dependencies, deliberately —
+both the bash scripts and the Node dashboard server run with nothing to
+install. The frontend is vanilla JS/CSS, no framework, no build step. Every
+transcript parser fails soft (skip the line/file, mark the field
+"unknown") because the JSONL format is internal to Claude Code and
+explicitly documented as subject to change between releases. Almost every
+non-obvious design choice below was arrived at by actually running the
+real command against real data and real system behavior, not by reasoning
+from documentation alone — several genuine bugs (§7) were only found this
+way, and would not have been caught by code review.</p>
+
+<p><strong>What "flexibility" means here today</strong> (expanded in §8): this
+is a personal/small-team tool tuned to one person's real Mac, not a
+general-purpose backup product. It is genuinely configurable along several
+axes (retention counts, snapshot cadence, context-window size, model choice,
+noise filtering, backup location, Claude config location) via
+<span class="file">config.json</span> and environment variables — but it is
+macOS-only for the interactive features, single-machine (backups live on the
+same disk), single-user (no auth, binds to localhost), and tied to Claude
+Code's current JSONL transcript shape (mitigated, not eliminated, by
+fail-soft parsing throughout).</p>
+</section>
+
+<section>
+<h1>2. Data model and the unified merge</h1>
+
+<h2>2.1 Three sources of truth for "does this session still exist"</h2>
+<table>
+  <tr><th>Source</th><th>Location</th><th>Written by</th><th>Mutability</th></tr>
+  <tr><td>Live</td><td><span class="file">~/.claude/projects/&lt;encoded-dir&gt;/&lt;id&gt;.jsonl</span></td>
+      <td>Claude Code itself</td><td>Mutated continuously while a session is open; deleted by Claude Code's own cleanup</td></tr>
+  <tr><td>Mirror</td><td><span class="file">$BACKUP_ROOT/mirror/…</span></td>
+      <td><span class="file">backup.sh</span> (<code>rsync -a --delete</code>)</td>
+      <td>Re-synced on every backup run — deletions from live <em>do</em> propagate here</td></tr>
+  <tr><td>Snapshot</td><td><span class="file">$BACKUP_ROOT/snapshots/claude-sessions-&lt;ts&gt;.tar.gz</span></td>
+      <td><span class="file">backup.sh</span>, only when <code>intervalDays</code> has elapsed</td>
+      <td>Immutable once written — only ever pruned whole, past <code>keepCount</code>, never edited</td></tr>
+</table>
+
+<div class="callout">
+<span class="label">Why the mirror isn't itself "real" protection</span>
+It uses <code>--delete</code> to stay in sync with live, so a deletion in live
+propagates to the mirror on the very next backup run. Its actual job is
+narrower: close the gap between "a session is created" and "it lands in an
+immutable snapshot," which matters specifically for the documented failure
+mode where Claude Code's cleanup deletes something before its <code>intervalDays</code>
+window is up. The snapshot is the only piece that is truly tamper-proof
+against Claude Code's own behavior.
+</div>
+
+<h2>2.2 The unified sessions table — merge algorithm</h2>
+<p><span class="file">lib/unified-sessions.js</span> produces one row per
+session id, never duplicated across sources, with badges for every place it
+currently exists. Confirmed with the user before building: merge priority is
+<strong>Live &gt; Mirror &gt; newest snapshot that has it</strong> — live is
+the freshest possible copy of the truth (could have grown since the last
+backup), mirror can lag by up to one backup cycle, and a snapshot is a frozen
+copy that could be much older, so among several qualifying snapshots the
+newest is the best guess at the session's last-known state.</p>
+
+<pre><code>for each session id across live ∪ mirror ∪ any-snapshot:
+  if in live:            use live's title/cwd/size/usage
+  else if in mirror:      use mirror's
+  else:                   use the newest snapshot containing it
+                          (extracted on demand — see 2.3)
+</code></pre>
+
+<h2>2.3 Keeping the merge cheap as snapshots accumulate</h2>
+<p>The naive approach — fully extract every session from every snapshot to
+know what's inside — does not scale with <code>keepCount</code>. The actual
+design:</p>
+<ul>
+  <li><strong>Live and mirror</strong> are read via <code>listSessionsInDir()</code>,
+  a full per-file analysis (see §3.1) — already fast, unchanged by anything
+  snapshot-related.</li>
+  <li><strong>Per snapshot</strong>, attaching an "in snapshot X" badge only
+  needs <code>tar -tzf</code> — the archive's member <em>listing</em>, which
+  reads the gzip stream but writes nothing to disk and decompresses no file
+  contents. This is <span class="file">backups.js</span>'s
+  <code>listSnapshotSessionIds()</code>.</li>
+  <li><strong>Full extraction</strong> (title/cwd from inside an archive) only
+  ever happens for a session that exists in <em>no</em> live or mirror copy —
+  rare in practice — and even then, sessions needing extraction are grouped
+  by which snapshot will supply them, so a given archive is extracted at most
+  once per merge, regardless of how many orphaned sessions it needs to
+  supply.</li>
+</ul>
+<p>Measured against the real machine this was built on (68 live sessions, 1
+snapshot, ~176MB source directory): full merge in ~2.4 seconds. The dominant
+cost is the live/mirror per-file reads, not the snapshot listing.</p>
+</section>
+
+<section>
+<h1>3. Core library modules</h1>
+
+<h2>3.1 <span class="file">lib/sessions.js</span> — single-pass transcript analysis</h2>
+<p>Originally three separate reads per file (cwd, usage, title each parsed
+the whole transcript independently) — replaced with one
+<code>analyzeSessionFile()</code> that reads once and extracts everything in
+a single line-by-line pass. On a real 26MB transcript this is the difference
+between one read and three.</p>
+
+<h3>Title resolution priority</h3>
+<p>Confirmed against real Claude Code data (not assumed) that sessions carry
+more identity information than a bare UUID:</p>
+<ol>
+  <li><span class="file">&lt;session-id&gt;/custom-title.json</span> side-car
+  file (e.g. <code>{"customTitle":"TWP-5695"}</code>) — treated as
+  authoritative, since it's the cheap dedicated file a UI would read.</li>
+  <li>An inline <code>{"type":"custom-title","customTitle":"…"}</code> entry
+  in the transcript itself — the same data, logged differently; used when the
+  side-car doesn't exist.</li>
+  <li>An inline <code>{"type":"ai-title","aiTitle":"…"}</code> entry —
+  auto-generated by Claude Code.</li>
+  <li>A truncated first user message (60 chars).</li>
+  <li>The short session id, as a last resort.</li>
+</ol>
+<p>The dashboard's Rename action writes only the side-car file (option 1) —
+reusing the exact mechanism Claude Code itself uses rather than inventing a
+second one.</p>
+
+<h3>Context-usage estimate</h3>
+<div class="callout">
+<span class="label">Confirmed via a real GitHub issue (anthropics/claude-code#28197)</span>
+<code>message.usage.input_tokens</code> is frequently a streaming placeholder
+(often exactly <code>1</code>), not the final value. The original approach
+(PRD-inherited) scanned a file from the end and took the first usage total
+that cleared a 50-token noise threshold. The single-pass rewrite achieves the
+identical result more cheaply: a forward pass that keeps <em>overwriting</em>
+"last qualifying total" whenever a line clears the threshold ends up holding
+the value from the highest-index qualifying line — provably the same answer
+as the backward scan, without a second pass or reversing anything.
+</div>
+<p>Default window: 1,000,000 tokens, matching current Sonnet-5/Opus-5-class
+models (verified via the model reference used elsewhere in this toolchain) —
+changed from an initial 200,000 default that was flagging most real sessions
+as falsely "100% full." Configurable per-install via
+<code>contextWindowTokens</code> in <span class="file">config.json</span>.</p>
+
+<h3>Path-traversal guards</h3>
+<p>Session ids and snapshot filenames arrive from HTTP request bodies and get
+joined into filesystem paths for essentially every operation (open,
+continue, rename, restore, delete). <code>isSafeSessionId()</code>
+(<code>/^[A-Za-z0-9_-]+$/</code>) is enforced at <code>findSessionFileIn()</code> —
+the one place a session id first becomes part of a path — so every caller is
+protected uniformly rather than each route remembering to validate. Snapshot
+filenames are equally constrained by <code>SNAPSHOT_NAME_RE</code> in
+<span class="file">lib/backups.js</span>, matching the exact format
+<span class="file">backup.sh</span> generates.</p>
+
+<h2>3.2 <span class="file">lib/unified-sessions.js</span></h2>
+<p>Covered in §2.2–2.3. No state of its own — pure function over the outputs
+of <span class="file">sessions.js</span> and <span class="file">backups.js</span>.</p>
+
+<h2>3.3 <span class="file">lib/backups.js</span></h2>
+<p>Snapshot listing, per-snapshot content browsing (extracts just the matched
+<code>.jsonl</code> members via an exact file list, never a glob — see §7 for
+why), single-session extraction for the Continue/restore flows
+(<code>extractSessionFromSnapshot</code>, which also pulls along a
+session's <span class="file">subagents/</span>/<span class="file">tool-results/</span>
+subdirectory if present), and mirror/snapshot deletion.</p>
+
+<h2>3.4 <span class="file">lib/claude-settings.js</span></h2>
+<p>The only module that writes to a file this project does not own —
+<span class="file">~/.claude/settings.json</span>, which also holds hooks,
+model choice, and other Claude Code configuration unrelated to this tool.
+Every write:</p>
+<ul>
+  <li>Reads and re-serializes the <em>whole</em> file, touching only the
+  <code>cleanupPeriodDays</code> key — never assumes the file's shape beyond
+  that one key.</li>
+  <li>Writes a timestamped backup copy first (pruned to the last 5).</li>
+  <li>Writes to a temp file in the same directory and renames over the
+  original — atomic, no window where the file is half-written.</li>
+  <li>Throws rather than guessing if the existing file fails to parse —
+  refuses to silently corrupt something it didn't write.</li>
+</ul>
+
+<h2>3.5 <span class="file">lib/automation.js</span></h2>
+<div class="callout">
+<span class="label">Confirmed by inspecting the real loaded launchd job</span>
+<code>launchctl print gui/&lt;uid&gt;/&lt;label&gt;</code> exposes
+<code>state</code>, <code>runs</code>, <code>last exit code</code>, and
+<code>run interval</code> — and nothing resembling a scheduled next-fire
+time for a <code>StartInterval</code> job. "Next run" in the dashboard is
+therefore computed (last completed run, parsed from
+<span class="file">backup.log</span>, plus the interval) and explicitly
+labeled an estimate, not a promise.
+</div>
+<p>This also required fixing <span class="file">backup.sh</span>'s log
+timestamps: bash's default <code>date</code> output
+(<code>Thu Aug 27 22:55:12 IST 2026</code>) is <code>Invalid Date</code> to
+JavaScript's <code>Date</code> constructor — <code>IST</code> is ambiguous
+across timezones and V8 rejects it. Switched to ISO 8601
+(<code>date -u +"%Y-%m-%dT%H:%M:%SZ"</code>), confirmed parseable, confirmed
+the parser correctly skips old-format lines and finds the newest
+ISO-format one when both exist in the same log.</p>
+
+<h2>3.6 <span class="file">lib/summarize.js</span> and the Continue feature</h2>
+<p>Generates the resume-brief by shelling out to the local <code>claude</code>
+CLI in headless mode (<code>claude -p … --output-format json</code>) rather
+than calling the Anthropic API directly. This was a deliberate pivot: the
+original design called the raw Messages API, which needs
+<code>ANTHROPIC_API_KEY</code> — not available on an enterprise/subscription
+plan with no raw API key. The CLI authenticates however the user's normal
+interactive sessions already do (OAuth/keychain/enterprise SSO), confirmed
+working with no key set in the environment.</p>
+<p>Per-call flags, each chosen for a specific reason: <code>--no-session-persistence</code>
+(a summarize call shouldn't itself create a new session transcript for this
+tool to have to manage), <code>--tools ""</code> (pure text in/out, no
+file/bash access, so no permission prompts), <code>--effort low</code> (a
+resume-brief is a rote task, not one that benefits from deep reasoning).</p>
+</section>
+
+<section>
+<h1>4. The Terminal-integration layer (osascript)</h1>
+
+<h2>4.1 Two independent quoting layers</h2>
+<p><span class="file">lib/shell.js</span> exports two escaping functions for
+two unrelated grammars:</p>
+<ul>
+  <li><code>shQuote()</code> — POSIX single-quote escaping (wrap in
+  <code>'…'</code>, turn embedded <code>'</code> into <code>'\''</code>) for
+  the shell command that ends up running inside Terminal.</li>
+  <li><code>asQuote()</code> — AppleScript string-literal escaping (escape
+  <code>\</code> and <code>"</code>) for the <code>do script "…"</code>
+  payload passed to <code>osascript</code>.</li>
+</ul>
+<p>These are independent because they protect against different parsers at
+different stages: <code>shQuote</code>'s output must survive bash/zsh;
+<code>asQuote</code>'s output must survive AppleScript's own compiler before
+that string is ever handed to a shell at all. <code>execFile()</code> is used
+with an argument array (never <code>shell: true</code>, never string
+concatenation into a shell command), so there is no third, Node-level
+interpretation layer to reason about — confirmed by adversarial round-trip
+tests (embedded <code>'</code>, <code>$</code>, backticks, spaces, empty
+string, mixed) against both a real spawned <code>bash</code> and real
+<code>osascript</code>.</p>
+
+<h2>4.2 <code>runInTerminal()</code> — the shared primitive</h2>
+<p>Both "Open" (<code>claude --resume &lt;id&gt;</code>) and "Continue"
+(<code>claude "$(cat &lt;brief file&gt;)"</code>) reduce to the same
+operation — build a shell command, wrap it for Terminal, run it — and share
+one implementation. macOS Automation-permission denials (<code>-1743</code>)
+are caught and surfaced as an actionable message rather than a raw
+osascript error.</p>
+
+<div class="diagram">
+  <img src="diagram-continue.png" alt="Continue flow diagram" />
+  <div class="cap">Fig. 2 — Continue: works for a live, mirror-only, or snapshot-only session alike</div>
+</div>
+</section>
+
+<section>
+<h1>5. Dashboard: server and frontend</h1>
+
+<h2>5.1 <span class="file">dashboard/server.js</span></h2>
+<p>A zero-dependency Node <code>http</code> server — no Express, no router
+library. Routes are a flat sequence of <code>if (pathname === … &amp;&amp;
+req.method === …)</code> checks inside one <code>handleApi()</code>
+function. Every mutating route validates its inputs (session id, snapshot
+filename) before they reach a filesystem path (§3.1). Long-running
+operations (<code>backup.sh</code>, <code>restore.sh</code>, the launchd
+scripts) run via <code>execFile('bash', [scriptPath, …args])</code>, never a
+shell string — same reasoning as §4.1.</p>
+
+<h3>Route inventory</h3>
+<table>
+  <tr><th>Route</th><th>Method</th><th>Purpose</th></tr>
+  <tr><td><span class="file">/api/status</span></td><td>GET</td><td>Combined status: paths, cleanup period, mirror/snapshot presence, automation state, config</td></tr>
+  <tr><td><span class="file">/api/backups/unified-sessions</span></td><td>GET</td><td>The merged sessions table (§2.2)</td></tr>
+  <tr><td><span class="file">/api/backups/snapshots</span></td><td>GET</td><td>List dated archives</td></tr>
+  <tr><td><span class="file">/api/backups/snapshot-sessions</span></td><td>GET</td><td>Contents of one archive</td></tr>
+  <tr><td><span class="file">/api/backup</span></td><td>POST</td><td>Run <span class="file">backup.sh</span></td></tr>
+  <tr><td><span class="file">/api/restore</span>, <span class="file">/api/restore-session</span></td><td>POST</td><td>Whole-source or single-session restore</td></tr>
+  <tr><td><span class="file">/api/sessions/delete</span>, <span class="file">/api/backups/delete-mirror-session</span>, <span class="file">/api/backups/delete-snapshot</span></td><td>POST</td><td>Deletion, scoped per source</td></tr>
+  <tr><td><span class="file">/api/sessions/rename</span></td><td>POST</td><td>Writes the custom-title.json side-car</td></tr>
+  <tr><td><span class="file">/api/sessions/continue</span></td><td>POST</td><td>Resolve → brief → new Terminal session (§3.6, §4)</td></tr>
+  <tr><td><span class="file">/api/open-session</span></td><td>POST</td><td><code>claude --resume</code> in the session's real cwd</td></tr>
+  <tr><td><span class="file">/api/cleanup-period</span></td><td>POST</td><td>Safe write to Claude Code's own settings.json (§3.4)</td></tr>
+  <tr><td><span class="file">/api/config</span></td><td>POST</td><td>This tool's own config.json</td></tr>
+  <tr><td><span class="file">/api/automation/install</span>, <span class="file">/api/automation/stop</span></td><td>POST</td><td>launchd load/unload</td></tr>
+</table>
+
+<h2>5.2 Frontend architecture</h2>
+<p>Vanilla JS/CSS, no framework, no build step, two tab scripts
+(<span class="file">backups.js</span>, <span class="file">automation.js</span>)
+plus a shared <span class="file">app.js</span>. All rendering is direct DOM
+manipulation and template-string <code>innerHTML</code> — user-controlled
+text (titles, paths) is escaped via a shared <code>escapeHtml()</code> before
+interpolation, everywhere, since it ultimately originates from HTTP
+responses derived from transcript content.</p>
+
+<h3>Client-side pagination</h3>
+<p>Each list (sessions, mirror, snapshots) fetches its full dataset once and
+paginates/filters entirely client-side. At this data scale (tens to low
+hundreds of rows) this is simpler than server-side <code>limit</code>/<code>offset</code>
+and avoids adding query-param handling to every list endpoint; it would need
+revisiting only if this ever needed to scale to thousands of rows, which is
+not the current problem.</p>
+
+<h3>Loading states</h3>
+<p>Added after it was pointed out that "Continue" (a real multi-second
+<code>claude -p</code> call, observed at 15-20+ seconds) gave zero visual
+feedback while running — indistinguishable from a broken button. A shared
+set of primitives (spinner glyph, table-level loading rows, two button
+wrappers for icon-only vs. text buttons) covers every async action
+uniformly, verified live that the spinner appears immediately and the
+button stays disabled through the entire real call.</p>
+
+<h3>Custom tooltip system</h3>
+<p>Replaced the native <code>title</code> attribute after it was reported as
+effectively invisible in practice — browsers delay it roughly half a second
+to a second and render it inconsistently across platforms. A CSS
+<code>[data-tooltip]::after</code> bubble, set via a shared
+<code>window.CSK.tooltip()</code> helper, appears in ~0.1s and looks
+identical everywhere; confirmed via automated hover that it's fully opaque
+within 200ms.</p>
+</section>
+
+<section>
+<h1>6. End-to-end walkthroughs</h1>
+
+<h3>6.1 "Continue" on a snapshot-only session</h3>
+<ol>
+  <li>Client sends <code>POST /api/sessions/continue {sessionId}</code>.</li>
+  <li>Server resolves the session file: not in live, not in mirror, so it
+  scans dated snapshots (newest first) for one containing this id, then
+  calls <code>extractSessionFromSnapshot()</code> to pull just that session's
+  <code>.jsonl</code> (plus any <code>subagents/</code>/<code>tool-results/</code>)
+  into a temp directory.</li>
+  <li>Server checks the session's real <code>cwd</code> (read from the
+  transcript, not the encoded directory name) still exists on disk — fails
+  with a clear 422 if not, rather than opening a Terminal that silently does
+  nothing (this matters in practice: an automated PR-review bot's sessions
+  commonly have a <span class="file">/tmp/pr-review-*</span> cwd that's long
+  gone).</li>
+  <li><span class="file">summarize.js</span> extracts the transcript text,
+  truncates to the most recent ~150,000 characters if needed, and calls
+  <code>claude -p</code> to get the brief.</li>
+  <li>The brief is written to a temp file; <code>runInTerminal()</code> opens
+  a new Terminal window running <code>claude "$(cat &lt;file&gt;)"</code>
+  (§4.2, §7 for why not a direct multi-line argument) in the resolved cwd.</li>
+  <li>Temp directories (extracted session, brief file) are cleaned up in a
+  <code>finally</code> block regardless of success/failure.</li>
+</ol>
+
+<h3>6.2 Restoring a single session from a specific snapshot</h3>
+<ol>
+  <li>Client sends <code>POST /api/restore-session {sessionId, source}</code>
+  where <code>source</code> is either <code>"mirror"</code> or a snapshot
+  filename (validated against <code>SNAPSHOT_NAME_RE</code>).</li>
+  <li>Server shells out to <span class="file">restore.sh --session &lt;id&gt;
+  --source &lt;mirror|archive-path&gt;</span>.</li>
+  <li>The script locates the session's file (and matching subdirectory) in
+  the mirror, or extracts the exact matching tar member(s) from the archive
+  into a temp dir, then reuses the same <code>restore_from_dir()</code> path
+  the other restore modes use.</li>
+  <li><code>rsync -a --ignore-existing --itemize-changes</code> copies only
+  what's missing at the target, never overwriting an existing file.</li>
+  <li>Every file the itemized output reports as actually transferred
+  (<code>&gt;f+++++++</code> lines) gets its mtime reset to now —
+  <strong>but only when the restore target is the live
+  <span class="file">~/.claude/projects</span></strong> — otherwise Claude
+  Code's cleanup would delete a restored, already-old session again on its
+  very next startup (§7).</li>
+</ol>
+</section>
+
+<section>
+<h1>7. Real bugs found during development</h1>
+<p>Every entry below was found by actually executing the code against real
+data or a real system, not by inspection — several would not have been
+caught by review alone. Listed because the failure modes are instructive
+for anyone extending this codebase.</p>
+
+<div class="bug">
+<span class="label">restore.sh aborted on the common case</span>
+<code>set -o pipefail</code> plus <code>grep</code> returning exit 1 on "no
+matches" meant that "nothing needed restoring" (a normal, frequent outcome —
+not an edge case) aborted the entire script under <code>set -e</code>. Fixed
+by neutralizing just that one pipeline stage's exit code
+(<code>{ grep '^&gt;f' || true; }</code>) without touching what it prints.
+</div>
+
+<div class="bug">
+<span class="label">bsdtar rejects a GNU-tar-ism</span>
+<code>tar -T -</code> (read the file list from stdin) is a GNU tar
+convention; macOS's bsdtar errors <code>Failed to open '-'</code>. Fixed by
+writing the member list to a real temp file and passing that path instead.
+</div>
+
+<div class="bug">
+<span class="label">Restore silently defeated its own purpose</span>
+<code>rsync -a</code> preserves the source file's original mtime. A restored
+session kept its old, already-cleanup-eligible mtime and would have been
+deleted again by Claude Code's own cleanup on the very next startup —
+confirmed by an actual touch+restore+stat test, not assumed. Fixed by
+resetting mtime on every file actually transferred, scoped to only the
+live-directory restore case.
+</div>
+
+<div class="bug">
+<span class="label">Progress bar never showed a fill</span>
+<code>.usage-bar-fill</code> was a bare <code>&lt;span&gt;</code> (inline by
+default); inline elements ignore explicit <code>width</code>/<code>height</code>
+in CSS. The percentage math was correct the whole time — nothing visibly
+rendered it. Fixed with <code>display: block</code>.
+</div>
+
+<div class="bug">
+<span class="label">A multi-line Terminal argument looks broken while it isn't</span>
+Passing a multi-paragraph resume-brief directly as <code>claude '&lt;brief&gt;'</code>
+is not a correctness bug — <code>shQuote</code>/<code>asQuote</code> round-trip
+it byte-for-byte, and Claude Code receives and responds to the full, correct
+text (confirmed). But <code>do script</code> "types" the whole command into
+Terminal, and a single-quoted argument spanning many physical lines makes the
+shell show its normal multi-line quote-continuation prompt for every line
+while it's typed — visually indistinguishable from a stuck shell. Fixed by
+writing the brief to a temp file and typing only <code>claude
+"$(cat &lt;file&gt;)"</code> — one short line, the multi-line content
+substituted in invisibly by the shell itself.
+</div>
+
+<div class="bug">
+<span class="label">Two tab scripts collided on one global scope</span>
+<span class="file">backups.js</span> and <span class="file">automation.js</span>
+are both classic (non-module) <code>&lt;script&gt;</code> tags, which share
+one top-level lexical scope in the browser — a bare top-level
+<code>const icon = …</code> in both files threw
+"Identifier 'icon' has already been declared," silently breaking the entire
+Automation tab. Fixed by wrapping each file's body in an IIFE.
+</div>
+
+<div class="bug">
+<span class="label">A hidden button wasn't actually hidden</span>
+<code>.btn { display: inline-flex }</code> and the browser's default
+<code>[hidden] { display: none }</code> have equal CSS specificity; the
+later rule in the cascade (the page's own stylesheet) won, so toggling
+<code>.hidden</code> on a button with class <code>.btn</code> had no visual
+effect — "Install / start" and "Stop" showed simultaneously, reported
+directly as confusing (looked like the tool didn't know its own state).
+Fixed with <code>[hidden] { display: none !important; }</code>, a global
+rule that guarantees the semantic attribute always wins.
+</div>
+
+<div class="bug">
+<span class="label">A flex row with a bare text node didn't wrap</span>
+Caption text set as <code>icon + raw text</code> (no wrapping element)
+inside a <code>display: flex</code> container produced an anonymous
+text-node flex item that didn't wrap the way a normal block does —
+overlapping text instead. Fixed by wrapping the text in a
+<code>&lt;span&gt;</code> with <code>flex: 1; min-width: 0</code>.
+</div>
+</section>
+
+<section>
+<h1>8. Configuration and current flexibility</h1>
+
+<h2>8.1 <span class="file">config.json</span></h2>
+<table>
+  <tr><th>Key</th><th>Default</th><th>Governs</th></tr>
+  <tr><td><code>keepCount</code></td><td>6</td><td>How many dated snapshots survive pruning</td></tr>
+  <tr><td><code>intervalDays</code></td><td>15</td><td>Minimum age of the last snapshot before another is cut</td></tr>
+  <tr><td><code>contextWindowTokens</code></td><td>1,000,000</td><td>Denominator for the context-usage % estimate</td></tr>
+  <tr><td><code>summarizeModel</code></td><td><code>sonnet</code></td><td><code>claude</code> CLI model alias/name used for Continue's resume-brief</td></tr>
+  <tr><td><code>titleExcludePatterns</code></td><td><code>["^Review \d+ changed file"]</code></td><td>Regexes hiding matching sessions from the default view (search overrides)</td></tr>
+</table>
+
+<h2>8.2 Environment variables</h2>
+<table>
+  <tr><th>Variable</th><th>Effect</th></tr>
+  <tr><td><code>CLAUDE_CONFIG_DIR</code></td><td>Overrides where "live" (<span class="file">~/.claude</span>) is read from — used throughout the test suite to point at fixture directories without touching real data, and usable to run this tool against a different Claude Code install</td></tr>
+  <tr><td><code>CLAUDE_SESSION_KEEPER_BACKUP_ROOT</code></td><td>Overrides where the mirror/snapshots live (default <span class="file">~/claude-session-keeper-backups</span>)</td></tr>
+  <tr><td><code>PORT</code></td><td>Dashboard HTTP port (default 4317)</td></tr>
+</table>
+<p>These two env vars are what make the module boundaries genuinely testable
+in isolation: every test that needs a "live" or "backup" directory points
+these at a temp directory rather than mocking the filesystem, so the tests
+exercise the real code paths (real <code>rsync</code>, real <code>tar</code>,
+real file I/O) against disposable data.</p>
+
+<h2>8.3 What is <em>not</em> currently configurable</h2>
+<ul>
+  <li><strong>launchd cadence</strong> — the daily <code>StartInterval</code>
+  is baked into the plist template, not read from
+  <span class="file">config.json</span>. Changing it means editing the
+  template and reinstalling.</li>
+  <li><strong>Backup destination type</strong> — always a local directory on
+  the same disk. No S3/cloud/offsite sync exists; disclosed plainly in the
+  README as a real limitation, not an oversight.</li>
+  <li><strong>Platform</strong> — Terminal integration (Open/Continue) and
+  the launchd scripts are macOS-only. <span class="file">backup.sh</span>/<span class="file">restore.sh</span>
+  are plain POSIX-ish bash and should run on Linux, but that path is
+  untested; there is no equivalent of the launchd automation for
+  Linux/systemd yet.</li>
+  <li><strong>Multi-user / multi-machine</strong> — single Claude Code
+  install, single backup root, no concept of merging backups from more than
+  one machine.</li>
+  <li><strong>Transcript format assumptions</strong> — the JSONL shape is
+  Claude Code's internal format and can change between releases (documented
+  by Claude Code itself). Every parser fails soft rather than throwing, which
+  buys resilience to *some* drift (a new field, a renamed entry type) but not
+  to a wholesale format change.</li>
+</ul>
+
+<h2>8.4 Where the code is already structured to extend</h2>
+<ul>
+  <li><code>listSessionsInDir(rootDir, opts)</code> is root-agnostic — the
+  live and mirror views are the exact same function called against two
+  different directories. A third source with the same on-disk layout would
+  plug in for free.</li>
+  <li><code>lib/backups.js</code> and <code>lib/sessions.js</code> have no
+  dependency on the dashboard — both are usable as plain Node libraries from
+  a different frontend or a CLI.</li>
+  <li>Every shell interaction goes through <code>execFile</code> with an
+  argument array, never a constructed shell string — extending the set of
+  automated actions (a new osascript-driven action, a new backup script) can
+  follow the exact same safe pattern already established in
+  <span class="file">shell.js</span>/<span class="file">server.js</span>.</li>
+</ul>
+</section>
+
+<section>
+<h1>9. Testing</h1>
+<p>80 unit tests, <code>node --test</code>, zero test dependencies. Two
+complementary strategies:</p>
+<ul>
+  <li><strong>Fixture-based unit tests</strong> for pure logic — title
+  resolution priority, context-usage noise-threshold math, the unified-merge
+  priority rules across every live/mirror/snapshot combination, path-traversal
+  rejection.</li>
+  <li><strong>Real-system verification</strong> for anything where a fixture
+  could hide the actual failure mode — the shell-quoting round-trips run
+  against a real spawned <code>bash</code> and real <code>osascript</code>;
+  the restore mtime fix was verified with real <code>touch</code> +
+  <code>rsync</code> against scratch directories; the launchd "not installed"
+  path was verified by actually unloading and reloading the real job; the
+  Continue feature's Terminal behavior was verified by reading the actual
+  Terminal window's contents after a real run, not just checking the HTTP
+  response.</li>
+</ul>
+<p>This distinction mattered in practice: several of the bugs in §7 (the
+mtime issue, the bsdtar flag, the terminal-typing appearance, the CSS
+specificity issues) are exactly the class of bug that a fixture-only test
+suite would not surface, because the fixture would encode the same
+assumption the code was making.</p>
+</section>
+
+</body>
+</html>
