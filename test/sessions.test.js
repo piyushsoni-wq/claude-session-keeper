@@ -11,6 +11,8 @@ const {
   resolveSessionTitle,
   estimateContextUsage,
   listSessionsInDir,
+  writeSessionTitle,
+  findSessionFileIn,
 } = require('../lib/sessions');
 
 const FIXTURES = path.join(__dirname, 'fixtures');
@@ -111,4 +113,42 @@ test('listSessionsInDir enumerates sessions from an arbitrary root (e.g. a mirro
 
 test('listSessionsInDir returns an empty list for a missing root', () => {
   assert.deepEqual(listSessionsInDir(path.join(FIXTURES, 'does-not-exist-dir')), []);
+});
+
+test('writeSessionTitle writes the side-car file and resolveSessionTitle picks it up immediately', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'csk-rename-'));
+  const projectDir = path.join(tmpDir, '-Users-test-project');
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.copyFileSync(path.join(FIXTURES, 'valid-session.jsonl'), path.join(projectDir, 'rename-me.jsonl'));
+
+  const written = writeSessionTitle(tmpDir, 'rename-me', '  TWP-8080  ');
+  assert.equal(written, 'TWP-8080');
+  assert.equal(resolveSessionTitle(path.join(projectDir, 'rename-me.jsonl')), 'TWP-8080');
+
+  const sidecar = JSON.parse(fs.readFileSync(path.join(projectDir, 'rename-me', 'custom-title.json'), 'utf8'));
+  assert.deepEqual(sidecar, { customTitle: 'TWP-8080' });
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('writeSessionTitle throws for a session that does not exist', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'csk-rename-'));
+  assert.throws(() => writeSessionTitle(tmpDir, 'does-not-exist', 'New Title'));
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('writeSessionTitle rejects an empty title', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'csk-rename-'));
+  const projectDir = path.join(tmpDir, '-Users-test-project');
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.copyFileSync(path.join(FIXTURES, 'valid-session.jsonl'), path.join(projectDir, 'session-x.jsonl'));
+  assert.throws(() => writeSessionTitle(tmpDir, 'session-x', '   '));
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('writeSessionTitle refuses a path-traversal-shaped session id', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'csk-rename-'));
+  assert.throws(() => writeSessionTitle(tmpDir, '../../../etc/passwd', 'New Title'));
+  assert.equal(findSessionFileIn(tmpDir, '../../../etc/passwd'), null);
+  fs.rmSync(tmpDir, { recursive: true, force: true });
 });

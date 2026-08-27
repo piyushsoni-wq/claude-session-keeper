@@ -67,6 +67,25 @@ test('listSnapshots lists matching archives sorted newest first, ignoring non-ma
   fs.rmSync(backupRoot, { recursive: true, force: true });
 });
 
+test('listSnapshotSessionIds lists just the ids, cheaply, excluding nested subagent files', () => {
+  const backupRoot = tmpBackupRoot();
+  const filename = 'claude-sessions-2026-03-02_00-00-00.tar.gz';
+  buildFakeSnapshot(backupRoot, filename);
+
+  const ids = backups.listSnapshotSessionIds(backupRoot, filename);
+  assert.deepEqual(ids.sort(), ['session-a', 'session-b']);
+
+  fs.rmSync(backupRoot, { recursive: true, force: true });
+});
+
+test('listSnapshotSessionIds returns [] for a missing archive or invalid filename', () => {
+  const backupRoot = tmpBackupRoot();
+  fs.mkdirSync(path.join(backupRoot, 'snapshots'), { recursive: true });
+  assert.deepEqual(backups.listSnapshotSessionIds(backupRoot, 'claude-sessions-2026-01-01_00-00-00.tar.gz'), []);
+  assert.deepEqual(backups.listSnapshotSessionIds(backupRoot, '../../../etc/passwd'), []);
+  fs.rmSync(backupRoot, { recursive: true, force: true });
+});
+
 test('listSnapshotSessions lists exactly the top-level sessions, excluding nested subagent files', () => {
   const backupRoot = tmpBackupRoot();
   const filename = 'claude-sessions-2026-03-01_00-00-00.tar.gz';
@@ -142,5 +161,40 @@ test('deleteMirrorSession refuses a path-traversal-shaped session id', () => {
   const backupRoot = tmpBackupRoot();
   fs.mkdirSync(path.join(backupRoot, 'mirror'), { recursive: true });
   assert.throws(() => backups.deleteMirrorSession(backupRoot, '../../../etc/passwd'));
+  fs.rmSync(backupRoot, { recursive: true, force: true });
+});
+
+test('extractSessionFromSnapshot extracts the .jsonl plus its subdirectory, and the caller can read it', () => {
+  const backupRoot = tmpBackupRoot();
+  const filename = 'claude-sessions-2026-05-01_00-00-00.tar.gz';
+  buildFakeSnapshot(backupRoot, filename);
+
+  const result = backups.extractSessionFromSnapshot(backupRoot, filename, 'session-a');
+  assert.ok(result);
+  assert.ok(fs.existsSync(result.filePath));
+  const content = fs.readFileSync(result.filePath, 'utf8');
+  assert.match(content, /TWP-1111/);
+  // its subagents/ subdirectory should have come along too
+  const subagentFile = path.join(path.dirname(result.filePath), 'session-a', 'subagents', 'agent-x.jsonl');
+  assert.ok(fs.existsSync(subagentFile));
+
+  fs.rmSync(result.tmpDir, { recursive: true, force: true });
+  fs.rmSync(backupRoot, { recursive: true, force: true });
+});
+
+test('extractSessionFromSnapshot returns null for a session not in the archive', () => {
+  const backupRoot = tmpBackupRoot();
+  const filename = 'claude-sessions-2026-05-02_00-00-00.tar.gz';
+  buildFakeSnapshot(backupRoot, filename);
+  assert.equal(backups.extractSessionFromSnapshot(backupRoot, filename, 'does-not-exist'), null);
+  fs.rmSync(backupRoot, { recursive: true, force: true });
+});
+
+test('extractSessionFromSnapshot refuses a path-traversal-shaped session id or filename', () => {
+  const backupRoot = tmpBackupRoot();
+  const filename = 'claude-sessions-2026-05-03_00-00-00.tar.gz';
+  buildFakeSnapshot(backupRoot, filename);
+  assert.equal(backups.extractSessionFromSnapshot(backupRoot, filename, '../../../etc/passwd'), null);
+  assert.equal(backups.extractSessionFromSnapshot(backupRoot, '../../../etc/passwd', 'session-a'), null);
   fs.rmSync(backupRoot, { recursive: true, force: true });
 });

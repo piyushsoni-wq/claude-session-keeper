@@ -2,5 +2,6 @@
   "keepCount": 6,
   "intervalDays": 15,
   "contextWindowTokens": 1000000,
-  "summarizeModel": "sonnet"
+  "summarizeModel": "sonnet",
+  "titleExcludePatterns": ["^Review \\d+ changed file"]
 }

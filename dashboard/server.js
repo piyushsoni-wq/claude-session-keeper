@@ -11,10 +11,10 @@ const { execFile } = require('child_process');
 
 const sessions = require('../lib/sessions');
 const summarize = require('../lib/summarize');
-const summariesStore = require('../lib/summaries-store');
 const claudeSettings = require('../lib/claude-settings');
 const automation = require('../lib/automation');
 const backups = require('../lib/backups');
+const unifiedSessions = require('../lib/unified-sessions');
 const { shQuote, asQuote } = require('../lib/shell');
 
 const REPO_ROOT = path.join(__dirname, '..');
@@ -28,6 +28,11 @@ const DEFAULT_CONFIG = {
   intervalDays: 15,
   contextWindowTokens: 1000000,
   summarizeModel: 'sonnet',
+  // Title patterns hidden from the default sessions view (searching for
+  // a match still shows them — see dashboard/public/backups.js). Started
+  // as a narrow, user-editable stopgap for an unrelated PR-review bot's
+  // auto-generated sessions; not a general automation/prevention feature.
+  titleExcludePatterns: ['^Review \\d+ changed file'],
 };
 
 function getBackupRoot() {
@@ -94,10 +99,8 @@ const STATIC_FILES = {
   '/': { file: 'index.html', type: 'text/html; charset=utf-8' },
   '/style.css': { file: 'style.css', type: 'text/css; charset=utf-8' },
   '/app.js': { file: 'app.js', type: 'application/javascript; charset=utf-8' },
-  '/live-sessions.js': { file: 'live-sessions.js', type: 'application/javascript; charset=utf-8' },
   '/backups.js': { file: 'backups.js', type: 'application/javascript; charset=utf-8' },
   '/automation.js': { file: 'automation.js', type: 'application/javascript; charset=utf-8' },
-  '/summaries.js': { file: 'summaries.js', type: 'application/javascript; charset=utf-8' },
 };
 
 function serveStatic(res, pathname) {
@@ -136,13 +139,16 @@ function isAutomationPermissionError(message) {
   return /not authorized|-1743|osascript is not allowed/i.test(message || '');
 }
 
-function openSessionInTerminal(cwd, sessionId) {
+// Shared by "Open" (resume an existing session) and "Continue" (open a
+// fresh one seeded with a resume-brief) — both are just "run this shell
+// command in Terminal, in this directory."
+function runInTerminal(cwd, innerCommand) {
   return new Promise((resolve) => {
     if (process.platform !== 'darwin') {
-      resolve({ ok: false, error: 'Open-in-Terminal is macOS-only (uses osascript + Terminal.app).' });
+      resolve({ ok: false, error: 'This action is macOS-only (uses osascript + Terminal.app).' });
       return;
     }
-    const shellCommand = `cd ${shQuote(cwd)} && claude --resume ${shQuote(sessionId)}`;
+    const shellCommand = `cd ${shQuote(cwd)} && ${innerCommand}`;
     const appleScript = `tell application "Terminal"\nactivate\ndo script ${asQuote(shellCommand)}\nend tell`;
     // Argument array + no shell:true — osascript receives the whole
     // AppleScript string as one argv entry, so there's no third,
@@ -164,6 +170,51 @@ function openSessionInTerminal(cwd, sessionId) {
       resolve({ ok: true });
     });
   });
+}
+
+function openSessionInTerminal(cwd, sessionId) {
+  return runInTerminal(cwd, `claude --resume ${shQuote(sessionId)}`);
+}
+
+// Confirmed by actually running this (not assumed): passing a multi-
+// line brief directly as `claude '<brief>'` is NOT a correctness bug —
+// shQuote/asQuote round-trip it byte-for-byte, and Claude Code receives
+// and responds to the full, correct text. But `do script` "types" the
+// whole command into Terminal, and a single-quoted argument spanning
+// many physical lines makes the shell show its normal multi-line-quote
+// continuation prompt for each line while it's "typed" — looks like a
+// stuck/broken shell even though it resolves correctly once the quote
+// closes. Writing the brief to a temp file and typing only
+// `claude "$(cat file)"` keeps the visibly-typed command to one short
+// line; the multi-line content is substituted in by the shell itself,
+// invisibly. Cleanup runs after claude exits (`;`, not `&&`, so it
+// still happens even if the user Ctrl-Cs out).
+function continueSessionInTerminal(cwd, brief) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'csk-continue-'));
+  const briefFile = path.join(tmpDir, 'brief.txt');
+  fs.writeFileSync(briefFile, brief, 'utf8');
+  const innerCommand = `claude "$(cat ${shQuote(briefFile)})" ; rm -rf ${shQuote(tmpDir)}`;
+  return runInTerminal(cwd, innerCommand);
+}
+
+// Resolves a session to a real file on disk, honoring the same
+// live > mirror > newest-snapshot priority as everything else. When the
+// only copy is inside a snapshot, extracts it to a temp dir — caller
+// must remove the returned tmpDir (null when no extraction happened).
+function resolveSessionFilePath(backupRoot, sessionId) {
+  const liveFile = sessions.findSessionFile(sessionId);
+  if (liveFile) return { filePath: liveFile, tmpDir: null };
+
+  const mirrorFile = sessions.findSessionFileIn(backups.mirrorDir(backupRoot), sessionId);
+  if (mirrorFile) return { filePath: mirrorFile, tmpDir: null };
+
+  for (const snap of backups.listSnapshots(backupRoot)) {
+    if (backups.listSnapshotSessionIds(backupRoot, snap.file).includes(sessionId)) {
+      const extracted = backups.extractSessionFromSnapshot(backupRoot, snap.file, sessionId);
+      if (extracted) return extracted;
+    }
+  }
+  return { filePath: null, tmpDir: null };
 }
 
 async function handleApi(req, res, pathname, query) {
@@ -206,8 +257,9 @@ async function handleApi(req, res, pathname, query) {
     return;
   }
 
-  if (pathname === '/api/live-sessions' && req.method === 'GET') {
-    sendJson(res, 200, { sessions: sessions.listLiveSessions(config.contextWindowTokens) });
+  if (pathname === '/api/automation/stop' && req.method === 'POST') {
+    const result = await runScript('scripts/stop-launchd.sh', []);
+    sendJson(res, result.ok ? 200 : 500, result);
     return;
   }
 
@@ -261,7 +313,7 @@ async function handleApi(req, res, pathname, query) {
 
   if (pathname === '/api/config' && req.method === 'POST') {
     const body = await readJsonBody(req);
-    const allowed = ['keepCount', 'intervalDays', 'contextWindowTokens', 'summarizeModel'];
+    const allowed = ['keepCount', 'intervalDays', 'contextWindowTokens', 'summarizeModel', 'titleExcludePatterns'];
     const partial = {};
     for (const key of allowed) {
       if (key in body) partial[key] = body[key];
@@ -288,9 +340,55 @@ async function handleApi(req, res, pathname, query) {
     return;
   }
 
-  if (pathname === '/api/backups/mirror-sessions' && req.method === 'GET') {
-    const mirrorDir = backups.mirrorDir(backupRoot);
-    sendJson(res, 200, { sessions: sessions.listSessionsInDir(mirrorDir, { contextWindowTokens: config.contextWindowTokens }) });
+  if (pathname === '/api/sessions/rename' && req.method === 'POST') {
+    const body = await readJsonBody(req);
+    const sessionId = body.sessionId;
+    const liveFile = sessions.isSafeSessionId(sessionId) ? sessions.findSessionFile(sessionId) : null;
+    const targetRoot = liveFile ? sessions.projectsDir() : backups.mirrorDir(backupRoot);
+    try {
+      const title = sessions.writeSessionTitle(targetRoot, sessionId, body.title);
+      sendJson(res, 200, { title });
+    } catch (err) {
+      sendError(res, 400, err.message);
+    }
+    return;
+  }
+
+  if (pathname === '/api/sessions/continue' && req.method === 'POST') {
+    const body = await readJsonBody(req);
+    const sessionId = body.sessionId;
+    if (!sessions.isSafeSessionId(sessionId)) {
+      sendError(res, 400, 'Invalid sessionId');
+      return;
+    }
+    const { filePath, tmpDir } = resolveSessionFilePath(backupRoot, sessionId);
+    if (!filePath) {
+      sendError(res, 404, `Session ${sessionId} not found`);
+      return;
+    }
+    try {
+      const cwd = sessions.resolveSessionCwd(filePath);
+      if (!cwd) {
+        sendError(res, 422, 'Could not resolve this session\'s working directory from its transcript.');
+        return;
+      }
+      if (!fs.existsSync(cwd)) {
+        sendError(res, 422, `This session's original directory no longer exists on disk: ${cwd}`);
+        return;
+      }
+      const { markdown } = await summarize.summarizeSession(filePath, { model: config.summarizeModel });
+      const result = await continueSessionInTerminal(cwd, markdown);
+      sendJson(res, result.ok ? 200 : 500, result);
+    } catch (err) {
+      sendError(res, 502, err.message);
+    } finally {
+      if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+    return;
+  }
+
+  if (pathname === '/api/backups/unified-sessions' && req.method === 'GET') {
+    sendJson(res, 200, { sessions: unifiedSessions.listUnifiedSessions(backupRoot, { contextWindowTokens: config.contextWindowTokens }) });
     return;
   }
 
@@ -329,68 +427,6 @@ async function handleApi(req, res, pathname, query) {
     } catch (err) {
       sendError(res, 400, err.message);
     }
-    return;
-  }
-
-  if (pathname === '/api/summarize' && req.method === 'POST') {
-    const body = await readJsonBody(req);
-    const sessionId = body.sessionId;
-    if (!sessionId) {
-      sendError(res, 400, 'sessionId required');
-      return;
-    }
-    const filePath = sessions.findSessionFile(sessionId);
-    if (!filePath) {
-      sendError(res, 404, `Session ${sessionId} not found`);
-      return;
-    }
-    try {
-      const { markdown, truncated, cwd } = await summarize.summarizeSession(filePath, {
-        model: config.summarizeModel,
-      });
-      const entry = summariesStore.saveSummary(REPO_ROOT, { sessionId, cwd, markdown, truncated });
-      sendJson(res, 200, { entry, markdown, truncated });
-    } catch (err) {
-      sendError(res, 502, err.message);
-    }
-    return;
-  }
-
-  if (pathname === '/api/summarize-all' && req.method === 'POST') {
-    const live = sessions.listLiveSessions(config.contextWindowTokens);
-    const results = { succeeded: 0, failed: 0, errors: [] };
-    // Sequential on purpose — runs dozens of `claude -p` child processes
-    // one at a time rather than hammering the plan's rate limit at once.
-    for (const s of live) {
-      try {
-        const { markdown, truncated, cwd } = await summarize.summarizeSession(s.filePath, {
-          model: config.summarizeModel,
-        });
-        summariesStore.saveSummary(REPO_ROOT, { sessionId: s.sessionId, cwd: cwd || s.cwd, markdown, truncated });
-        results.succeeded += 1;
-      } catch (err) {
-        results.failed += 1;
-        results.errors.push({ sessionId: s.sessionId, error: err.message });
-      }
-    }
-    sendJson(res, 200, results);
-    return;
-  }
-
-  if (pathname === '/api/summaries' && req.method === 'GET') {
-    const id = query.get('id');
-    if (id) {
-      const markdown = summariesStore.getSummary(REPO_ROOT, id);
-      if (markdown === null) {
-        sendError(res, 404, `No summary stored for session ${id}`);
-        return;
-      }
-      sendJson(res, 200, { sessionId: id, markdown });
-      return;
-    }
-    const q = query.get('q');
-    const list = q ? summariesStore.searchSummaries(REPO_ROOT, q) : summariesStore.listSummaries(REPO_ROOT);
-    sendJson(res, 200, { summaries: list });
     return;
   }
 

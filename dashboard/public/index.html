@@ -10,118 +10,80 @@
   <header class="topbar">
     <h1>claude-session-keeper</h1>
     <div id="cleanupBanner" class="banner" hidden></div>
+    <p class="tagline">Backs up your Claude Code sessions before its own cleanup deletes them — browse everything you have a copy of below.</p>
   </header>
 
   <nav class="tabs">
-    <button class="tab-btn active" data-tab="live">Live Sessions</button>
-    <button class="tab-btn" data-tab="backups">Backups</button>
+    <button class="tab-btn active" data-tab="backups">Backups</button>
     <button class="tab-btn" data-tab="automation">Automation &amp; Settings</button>
-    <button class="tab-btn" data-tab="summaries">Summaries</button>
   </nav>
 
   <main>
-    <!-- ============ LIVE SESSIONS TAB ============ -->
-    <section class="tab-panel active" id="tab-live">
+    <!-- ============ BACKUPS TAB (primary) ============ -->
+    <section class="tab-panel active" id="tab-backups">
       <div class="card">
         <div class="card-header">
-          <h2>Live sessions</h2>
-          <button id="refreshSessionsBtn" class="btn">Refresh</button>
+          <h2 id="backupStatusHeading">Backup status</h2>
+          <button id="backupNowBtn" class="btn primary"></button>
         </div>
-        <p class="hint">
-          Sessions currently under <code>~/.claude/projects</code> — these are what Claude Code itself
-          will delete once they're older than the cleanup period shown above. "Context usage" is an
-          estimate of how full that session's context window was on its last turn.
-        </p>
-        <div class="bulk-bar">
-          <button id="bulkDeleteBtn" class="btn danger" disabled>Delete selected</button>
-          <span class="count" id="bulkSelectedCount"></span>
-        </div>
-        <table id="sessionsTable">
-          <thead>
-            <tr>
-              <th class="checkbox-col"><input type="checkbox" id="selectAllSessions" /></th>
-              <th>Session</th>
-              <th>Directory</th>
-              <th>Last active</th>
-              <th>Context usage</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="sessionsBody"></tbody>
-        </table>
-        <div class="pager" id="sessionsPager"></div>
-      </div>
-    </section>
-
-    <!-- ============ BACKUPS TAB ============ -->
-    <section class="tab-panel" id="tab-backups">
-      <div class="card">
-        <div class="card-header">
-          <h2>Backup status</h2>
-          <button id="backupNowBtn" class="btn primary">Run backup now</button>
-        </div>
-        <p class="hint">
-          Mirrors <code>~/.claude/projects</code> into the backup root now, and cuts a new dated
-          snapshot if <code>intervalDays</code> has elapsed since the last one. The mirror gets
-          deletions propagated too — real protection against Claude Code's own cleanup comes from the
-          dated snapshots below, which are never modified once written.
-        </p>
+        <p class="hint" id="backupStatusHint"></p>
         <dl class="status-grid" id="statusGrid"></dl>
         <pre id="scriptOutput" class="script-output" hidden></pre>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <h2>Mirror contents</h2>
+          <h2 id="sessionsHeading">Sessions</h2>
+          <button id="refreshSessionsBtn" class="btn"></button>
         </div>
-        <p class="hint">
-          Every session currently in the mirror (a live-updating copy, so this may include sessions
-          already cleaned up from the live directory). "Restore" copies it back to
-          <code>~/.claude/projects</code> without overwriting anything already there, and refreshes its
-          timestamp so Claude Code's cleanup won't immediately delete it again.
-        </p>
-        <table id="mirrorTable">
-          <thead>
-            <tr>
-              <th>Session</th>
-              <th>Directory</th>
-              <th>Last active</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="mirrorBody"></tbody>
-        </table>
-        <div class="pager" id="mirrorPager"></div>
+        <p class="hint" id="sessionsHint"></p>
+        <div class="search-box"></div>
+        <div class="bulk-bar">
+          <button id="bulkDeleteBtn" class="btn danger small" disabled></button>
+          <span class="count" id="bulkSelectedCount"></span>
+          <button id="selectAllMatchingBtn" class="select-all-matching" hidden></button>
+        </div>
+        <div class="table-wrap">
+          <table id="sessionsTable">
+            <thead>
+              <tr>
+                <th class="checkbox-col"><input type="checkbox" id="selectAllSessions" /></th>
+                <th>Session</th>
+                <th>Directory</th>
+                <th>Last active</th>
+                <th>Where it exists</th>
+                <th>Context usage</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="sessionsBody"></tbody>
+          </table>
+        </div>
+        <div class="pager" id="sessionsPager"></div>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <h2>Dated snapshots</h2>
+          <h2 id="snapshotsHeading">Dated snapshots</h2>
         </div>
-        <p class="hint">
-          Immutable point-in-time archives, kept up to <code>keepCount</code> of them. Click a snapshot
-          to see what sessions are inside it and restore one individually, or delete the whole snapshot.
-        </p>
-        <table id="snapshotsTable">
-          <thead>
-            <tr>
-              <th>File</th>
-              <th>Size</th>
-              <th>Age</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="snapshotsBody"></tbody>
-        </table>
+        <p class="hint" id="snapshotsHint"></p>
+        <div class="table-wrap">
+          <table id="snapshotsTable">
+            <thead>
+              <tr><th>File</th><th>Size</th><th>Age</th><th></th></tr>
+            </thead>
+            <tbody id="snapshotsBody"></tbody>
+          </table>
+        </div>
         <div class="pager" id="snapshotsPager"></div>
         <div id="snapshotDetail" class="subsection" hidden>
           <h3 id="snapshotDetailTitle"></h3>
-          <table>
-            <thead>
-              <tr><th>Session</th><th>Directory</th><th></th></tr>
-            </thead>
-            <tbody id="snapshotDetailBody"></tbody>
-          </table>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Session</th><th>Directory</th><th></th></tr></thead>
+              <tbody id="snapshotDetailBody"></tbody>
+            </table>
+          </div>
         </div>
       </div>
     </section>
@@ -130,89 +92,60 @@
     <section class="tab-panel" id="tab-automation">
       <div class="card">
         <div class="card-header">
-          <h2>Automation (launchd)</h2>
-          <button id="installAutomationBtn" class="btn primary">Install / reinstall automation</button>
+          <h2 id="automationHeading">Automation</h2>
+          <div class="inline-form">
+            <button id="installAutomationBtn" class="btn primary" hidden></button>
+            <button id="stopAutomationBtn" class="btn danger" hidden></button>
+          </div>
         </div>
-        <p class="hint">
-          Whether the scheduled backup job is actually loaded, and roughly when it'll next run. launchd
-          itself doesn't expose an exact "next run" time for this kind of job — the estimate below is
-          computed from the last completed run plus the interval, not a guarantee (sleep/wake can shift
-          it). "Install / reinstall" is safe to click any time — it re-renders the launchd job file and
-          reloads it.
-        </p>
+        <p class="hint" id="automationHint"></p>
         <dl class="status-grid" id="automationGrid"></dl>
         <pre id="automationOutput" class="script-output" hidden></pre>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <h2>Cleanup period</h2>
+          <h2 id="cleanupHeading">Cleanup period</h2>
         </div>
-        <p class="hint">
-          <code>cleanupPeriodDays</code> in <code>~/.claude/settings.json</code> — Claude Code's own
-          setting for how old (by last-modified time) a session can get before it deletes it on
-          startup. This edits that file directly; a timestamped backup copy is kept before every change
-          in case something needs to be undone.
-        </p>
+        <p class="hint" id="cleanupHint"></p>
         <div class="inline-form">
-          <input id="cleanupPeriodInput" type="number" min="1" style="width:100px" />
-          <span>days</span>
-          <button id="saveCleanupPeriodBtn" class="btn primary">Save</button>
+          <input id="cleanupPeriodInput" type="number" min="1" style="width:90px" />
+          <span style="font-size:13px;color:var(--text-muted)">days</span>
+          <button id="saveCleanupPeriodBtn" class="btn primary"></button>
         </div>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <h2>Config</h2>
-          <button id="saveConfigBtn" class="btn primary">Save</button>
+          <h2 id="configHeading">Config</h2>
+          <button id="saveConfigBtn" class="btn primary"></button>
         </div>
-        <p class="hint">
-          This tool's own settings (<code>config.json</code>), separate from Claude Code's own
-          settings above.
-        </p>
+        <p class="hint" id="configHint"></p>
         <div class="config-grid">
-          <label>keepCount — how many dated snapshots to keep
+          <label>keepCount — snapshots to keep
             <input id="cfgKeepCount" type="number" min="1" />
           </label>
-          <label>intervalDays — days between dated snapshots
+          <label>intervalDays — days between snapshots
             <input id="cfgIntervalDays" type="number" min="1" />
           </label>
-          <label>contextWindowTokens — for the usage % estimate
+          <label>contextWindowTokens — for usage %
             <input id="cfgContextWindow" type="number" min="1000" step="1000" />
           </label>
-          <label>summarizeModel — claude CLI model alias/name
+          <label>summarizeModel — claude CLI model
             <input id="cfgModel" type="text" />
           </label>
         </div>
-      </div>
-    </section>
-
-    <!-- ============ SUMMARIES TAB ============ -->
-    <section class="tab-panel" id="tab-summaries">
-      <div class="card">
-        <div class="card-header">
-          <h2>Resume-brief summaries</h2>
-          <button id="summarizeAllBtn" class="btn">Summarize all live sessions</button>
+        <div class="config-grid full" style="margin-top:12px">
+          <label>titleExcludePatterns — one regex per line, hidden from the default view (search overrides)
+            <textarea id="cfgExcludePatterns" rows="3"></textarea>
+          </label>
         </div>
-        <p class="hint">
-          Each summary is generated by running <code>claude -p</code> locally (no API key — same
-          auth as your normal Claude Code sessions) once per session, to produce a short "resume
-          brief" you can search later instead of re-reading a whole raw transcript. "Summarize all"
-          runs one such call per <em>live</em> session, sequentially — real usage against your plan,
-          same as any other Claude Code session. You'll be asked to confirm the count before it runs.
-        </p>
-        <input id="summarySearch" type="text" placeholder="search summaries…" />
-        <ul id="summariesList" class="list-plain"></ul>
-        <div class="pager" id="summariesPager"></div>
-        <div id="summaryDetail" class="summary-detail" hidden></div>
       </div>
     </section>
   </main>
 
   <script src="/app.js"></script>
-  <script src="/live-sessions.js"></script>
   <script src="/backups.js"></script>
   <script src="/automation.js"></script>
-  <script src="/summaries.js"></script>
 </body>
 </html>
