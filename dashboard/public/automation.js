@@ -4,7 +4,7 @@
 // tags share one top-level scope, so each tab script needs its own
 // function scope to avoid colliding on names like `icon`.
 (function automationTab() {
-const { icon, escapeHtml, fetchJson, fmtWhen, renderCleanupBanner, hintHtml } = window.CSK;
+const { icon, escapeHtml, fetchJson, fmtWhen, renderCleanupBanner, hintHtml, loadingBlock, withLoading } = window.CSK;
 
 function initStaticLabels() {
   document.getElementById('automationHeading').innerHTML = `${icon('power')} Automation`;
@@ -29,6 +29,7 @@ function showAutomationOutput(result) {
 }
 
 async function loadAutomationStatus() {
+  document.getElementById('automationGrid').innerHTML = loadingBlock('Loading automation status…');
   const status = await fetchJson('/api/status');
   renderCleanupBanner(status.cleanupPeriodDays);
 
@@ -71,46 +72,47 @@ async function loadAutomationStatus() {
 
 async function installAutomation() {
   const btn = document.getElementById('installAutomationBtn');
-  btn.disabled = true;
-  try {
-    const result = await fetchJson('/api/automation/install', { method: 'POST' });
-    showAutomationOutput(result);
-    await loadAutomationStatus();
-  } catch (err) {
-    alert(err.message);
-  } finally {
-    btn.disabled = false;
-  }
+  await withLoading(btn, 'Installing…', async () => {
+    try {
+      const result = await fetchJson('/api/automation/install', { method: 'POST' });
+      showAutomationOutput(result);
+      await loadAutomationStatus();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
 async function stopAutomation() {
   if (!confirm("Stop the scheduled backup job? It stays installed but won't run again until you start it.")) return;
   const btn = document.getElementById('stopAutomationBtn');
-  btn.disabled = true;
-  try {
-    const result = await fetchJson('/api/automation/stop', { method: 'POST' });
-    showAutomationOutput(result);
-    await loadAutomationStatus();
-  } catch (err) {
-    alert(err.message);
-  } finally {
-    btn.disabled = false;
-  }
+  await withLoading(btn, 'Stopping…', async () => {
+    try {
+      const result = await fetchJson('/api/automation/stop', { method: 'POST' });
+      showAutomationOutput(result);
+      await loadAutomationStatus();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
 async function saveCleanupPeriod() {
   const days = Number(document.getElementById('cleanupPeriodInput').value);
   if (!confirm(`Set Claude Code's cleanupPeriodDays to ${days}? This edits ~/.claude/settings.json directly (a timestamped backup is kept first).`)) return;
-  try {
-    await fetchJson('/api/cleanup-period', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ days }),
-    });
-    await loadAutomationStatus();
-  } catch (err) {
-    alert(err.message);
-  }
+  const btn = document.getElementById('saveCleanupPeriodBtn');
+  await withLoading(btn, 'Saving…', async () => {
+    try {
+      await fetchJson('/api/cleanup-period', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days }),
+      });
+      await loadAutomationStatus();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
 async function saveConfig() {
@@ -123,17 +125,20 @@ async function saveConfig() {
     summarizeModel: document.getElementById('cfgModel').value.trim(),
     titleExcludePatterns: patterns,
   };
-  try {
-    await fetchJson('/api/config', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    await loadAutomationStatus();
-    if (window.CSK.onConfigSaved) window.CSK.onConfigSaved();
-  } catch (err) {
-    alert(err.message);
-  }
+  const btn = document.getElementById('saveConfigBtn');
+  await withLoading(btn, 'Saving…', async () => {
+    try {
+      await fetchJson('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      await loadAutomationStatus();
+      if (window.CSK.onConfigSaved) window.CSK.onConfigSaved();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
 initStaticLabels();

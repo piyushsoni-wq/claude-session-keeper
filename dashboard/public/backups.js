@@ -7,7 +7,10 @@
 // by actually loading the page. Wrapping each file's body gives it a
 // private function scope instead.
 (function backupsTab() {
-const { icon, escapeHtml, fetchJson, fmtBytes, fmtAgo, createPager, pageSlice, renderPagerControls, emptyState, renderCleanupBanner, hintHtml } = window.CSK;
+const {
+  icon, escapeHtml, fetchJson, fmtBytes, fmtAgo, createPager, pageSlice, renderPagerControls,
+  emptyState, renderCleanupBanner, hintHtml, loadingRow, loadingBlock, withLoading, withLoadingIcon,
+} = window.CSK;
 
 const sessionsPager = createPager(20);
 const snapshotsPager = createPager(20);
@@ -44,6 +47,7 @@ function initStaticLabels() {
 // ---- Backup status card ----
 
 async function loadBackupStatus() {
+  document.getElementById('statusGrid').innerHTML = loadingBlock('Loading backup status…');
   const status = await fetchJson('/api/status');
   renderCleanupBanner(status.cleanupPeriodDays);
 
@@ -76,24 +80,21 @@ function showScriptOutput(result) {
 
 async function runBackup() {
   const btn = document.getElementById('backupNowBtn');
-  btn.disabled = true;
-  const original = btn.innerHTML;
-  btn.innerHTML = `${icon('refresh')} Backing up…`;
-  try {
-    const result = await fetchJson('/api/backup', { method: 'POST' });
-    showScriptOutput(result);
-    await Promise.all([loadBackupStatus(), loadSessions(), loadSnapshots()]);
-  } catch (err) {
-    alert(err.message);
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = original;
-  }
+  await withLoading(btn, 'Backing up…', async () => {
+    try {
+      const result = await fetchJson('/api/backup', { method: 'POST' });
+      showScriptOutput(result);
+      await Promise.all([loadBackupStatus(), loadSessions(), loadSnapshots()]);
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
 // ---- Unified sessions table ----
 
 async function loadSessions() {
+  document.getElementById('sessionsBody').innerHTML = loadingRow(7, 'Loading sessions…');
   const { sessions } = await fetchJson('/api/backups/unified-sessions');
   allSessions = sessions;
   applyFilterAndRender();
@@ -137,12 +138,17 @@ function usageCellHtml(row) {
   return `<span class="usage-cell"><span class="usage-bar"><span class="usage-bar-fill ${cls}" style="width:${pct}%"></span></span>${pct}%</span>`;
 }
 
+// Every row action (Open/Continue/Rename/Restore/Delete/Browse) is async
+// and can take real time — Continue especially, a real `claude -p` call
+// (15-20+ seconds observed) that previously gave zero feedback while it
+// ran. Wrapping here once means every call site gets the busy-spinner
+// treatment for free, without each one remembering to add it.
 function actionBtn(iconName, label, onClick, extraClass) {
   const b = document.createElement('button');
   b.className = `btn ghost small${extraClass ? ` ${extraClass}` : ''}`;
   b.title = label;
   b.innerHTML = icon(iconName);
-  b.onclick = onClick;
+  b.onclick = () => withLoadingIcon(b, onClick);
   return b;
 }
 
@@ -336,6 +342,7 @@ function deleteSession(row) {
 // ---- Snapshots management ----
 
 async function loadSnapshots() {
+  document.getElementById('snapshotsBody').innerHTML = loadingRow(4, 'Loading snapshots…');
   const { snapshots } = await fetchJson('/api/backups/snapshots');
   snapshotsPager.items = snapshots;
   snapshotsPager.page = 1;
@@ -385,7 +392,7 @@ async function browseSnapshot(file) {
   const body = document.getElementById('snapshotDetailBody');
   detail.hidden = false;
   title.innerHTML = `${icon('archive', 13)} Contents of ${escapeHtml(file)}`;
-  body.innerHTML = '<tr><td colspan="3">Loading…</td></tr>';
+  body.innerHTML = loadingRow(3, 'Loading snapshot contents…');
 
   try {
     const { sessions } = await fetchJson(`/api/backups/snapshot-sessions?file=${encodeURIComponent(file)}`);
@@ -417,7 +424,7 @@ async function browseSnapshot(file) {
 initStaticLabels();
 
 document.getElementById('backupNowBtn').addEventListener('click', runBackup);
-document.getElementById('refreshSessionsBtn').addEventListener('click', loadSessions);
+document.getElementById('refreshSessionsBtn').addEventListener('click', (e) => withLoading(e.currentTarget, 'Refreshing…', loadSessions));
 
 document.getElementById('selectAllSessions').addEventListener('change', (e) => {
   const pageItems = pageSlice(sessionsPager);
@@ -431,9 +438,15 @@ document.getElementById('selectAllMatchingBtn').addEventListener('click', () => 
   renderSessionsPage();
 });
 
-document.getElementById('bulkDeleteBtn').addEventListener('click', () => {
+document.getElementById('bulkDeleteBtn').addEventListener('click', (e) => {
   const ids = Array.from(selectedIds);
-  deleteSessionIds(ids, `Delete ${ids.length} selected session(s)? Each is removed from wherever it currently is (live and/or mirror) — snapshots already containing them are unaffected.`);
+  const msg = `Delete ${ids.length} selected session(s)? Each is removed from wherever it currently is (live and/or mirror) — snapshots already containing them are unaffected.`;
+  // deleteSessionIds's own confirm() ends up inside the busy-button
+  // window (the button shows a spinner while the modal dialog waits for
+  // a response) — harmless, since a native confirm() blocks everything
+  // else anyway, and it keeps this one call site consistent with how
+  // every row action already wraps confirm+work together.
+  withLoading(e.currentTarget, 'Deleting…', () => deleteSessionIds(ids, msg));
 });
 
 // titleExcludePatterns lives in config.json, edited on the Automation

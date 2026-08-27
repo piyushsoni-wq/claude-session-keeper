@@ -129,6 +129,57 @@ window.CSK.emptyState = function emptyState(message) {
   return `<div class="empty-state">${window.CSK.icon('archive', 22)}<p>${window.CSK.escapeHtml(message)}</p></div>`;
 };
 
+// ---- Loading states ----
+// Every async action (initial table load, refresh, and especially
+// "Continue" — a real `claude -p` call that can take 15-20+ real
+// seconds — showed no busy indicator at all before this. Three shapes
+// covers everywhere it's needed: a spinner glyph, a full loading row for
+// tables/lists, and two button wrappers (icon-only small row actions vs.
+// normal text buttons) that disable the button and swap in a spinner for
+// the duration, always restoring it in a `finally` regardless of
+// success or failure.
+
+window.CSK.spinnerHtml = function spinnerHtml() {
+  return '<span class="spinner"></span>';
+};
+
+window.CSK.loadingRow = function loadingRow(colspan, label) {
+  return `<tr><td colspan="${colspan}" class="loading-row">${window.CSK.spinnerHtml()}${window.CSK.escapeHtml(label || 'Loading…')}</td></tr>`;
+};
+
+window.CSK.loadingBlock = function loadingBlock(label) {
+  return `<div class="loading-row">${window.CSK.spinnerHtml()}${window.CSK.escapeHtml(label || 'Loading…')}</div>`;
+};
+
+// For normal-sized text buttons ("Run backup now", "Save", ...): shows
+// spinner + label in place of the button's usual content.
+window.CSK.withLoading = async function withLoading(btn, label, fn) {
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = `${window.CSK.spinnerHtml()}${window.CSK.escapeHtml(label)}`;
+  try {
+    return await fn();
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+};
+
+// For small icon-only row actions (Open/Continue/Rename/Restore/Delete):
+// swaps just the icon for a spinner, same size, so the row doesn't
+// reflow while the action is in flight.
+window.CSK.withLoadingIcon = async function withLoadingIcon(btn, fn) {
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = window.CSK.spinnerHtml();
+  try {
+    return await fn();
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+};
+
 // ---- Tabs (pill segmented control) ----
 
 document.querySelectorAll('.tab-btn').forEach((btn) => {
