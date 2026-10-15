@@ -27,12 +27,18 @@ function initStaticLabels() {
   const backupNowBtn = document.getElementById('backupNowBtn');
   backupNowBtn.innerHTML = `${icon('refresh')} Run backup now`;
   tooltip(backupNowBtn, "Mirror live sessions now, and cut a new dated snapshot if it's due");
+  const restoreMirrorBtn = document.getElementById('restoreMirrorBtn');
+  restoreMirrorBtn.innerHTML = `${icon('restore')} Restore mirror`;
+  tooltip(restoreMirrorBtn, 'Restore every session in the mirror back into ~/.claude/projects');
   document.getElementById('backupStatusHint').innerHTML = hintHtml('gear', `Mirrors <code>~/.claude/projects</code> now, and cuts a new dated snapshot if <code>intervalDays</code> has passed since the last one. The mirror only updates when a backup actually runs — this button, the daily automation, or at login — not continuously.`);
 
   document.getElementById('sessionsHeading').innerHTML = `${icon('search')} Sessions`;
   const refreshBtn = document.getElementById('refreshSessionsBtn');
   refreshBtn.innerHTML = `${icon('refresh')} Refresh`;
   tooltip(refreshBtn, 'Reload the sessions table');
+  const newSessionBtn = document.getElementById('newSessionBtn');
+  newSessionBtn.innerHTML = `${icon('plus')} New session`;
+  tooltip(newSessionBtn, 'Open a brand-new, empty Claude Code session in Terminal, in a directory you choose');
   document.getElementById('sessionsHint').innerHTML = hintHtml('gear', 'Every session this tool knows about — live, mirrored, or only inside a snapshot — merged into one row per session. Badges show where each currently exists.');
 
   document.getElementById('snapshotsHeading').innerHTML = `${icon('archive')} Dated snapshots`;
@@ -100,6 +106,27 @@ async function runBackup() {
   });
 }
 
+async function runRestoreMirror() {
+  const proceed = confirm(
+    "Restore every session in the mirror into ~/.claude/projects?\n\nThis never overwrites an existing live file — it only fills in what's missing, and restored files' timestamps are refreshed so Claude Code's cleanup won't immediately delete them again.",
+  );
+  if (!proceed) return;
+  const btn = document.getElementById('restoreMirrorBtn');
+  await withLoading(btn, 'Restoring…', async () => {
+    try {
+      const result = await fetchJson('/api/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mirror: true }),
+      });
+      showScriptOutput(result);
+      await loadSessions();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+}
+
 // ---- Unified sessions table ----
 
 async function loadSessions() {
@@ -133,7 +160,17 @@ function applyFilterAndRender() {
 function badgesHtml(row) {
   const parts = [];
   if (row.inLive) parts.push('<span class="pill ok">Live</span>');
-  if (row.inMirror) parts.push('<span class="pill accent">Mirror</span>');
+  if (row.inMirror) {
+    // Clickable only when the session exists in BOTH places — that's
+    // exactly the case a plain restore can't help (rsync --ignore-existing
+    // skips a file that's already there live), and the only case where a
+    // content-level merge has two real copies to reconcile.
+    if (row.inLive) {
+      parts.push('<button type="button" class="pill accent pill-btn mirror-merge-btn" data-tooltip="Merge every line from the mirror into the live copy (nothing already live is ever lost)">Mirror</button>');
+    } else {
+      parts.push('<span class="pill accent">Mirror</span>');
+    }
+  }
   if (row.inSnapshots.length > 0) {
     parts.push(`<span class="pill neutral">${row.inSnapshots.length} snapshot${row.inSnapshots.length > 1 ? 's' : ''}</span>`);
   }
@@ -192,6 +229,9 @@ function renderSessionsPage() {
       updateSelectAllState();
       updateBulkBar();
     });
+
+    const mirrorBtn = tr.querySelector('.mirror-merge-btn');
+    if (mirrorBtn) mirrorBtn.addEventListener('click', () => withLoadingIcon(mirrorBtn, () => mergeWithMirror(row)));
 
     const actionsTd = tr.querySelector('.actions');
     if (row.inLive) actionsTd.appendChild(actionBtn('open', 'Open', () => openSession(row)));
@@ -265,6 +305,22 @@ async function continueSession(row) {
   }
 }
 
+async function newSession() {
+  const fallback = '/Users/piyushsoni/the-sleep-company';
+  const dir = prompt('Directory to start a new Claude Code session in (absolute path or ~/...):', fallback);
+  if (!dir || !dir.trim()) return;
+  try {
+    const result = await fetchJson('/api/sessions/new', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cwd: dir.trim() }),
+    });
+    if (!result.ok) { alert(result.error || 'Failed to start a new session.'); return; }
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
 async function renameSession(row) {
   if (row.snapshotOnly) {
     alert('This session only exists in a snapshot (immutable) — restore it first, then rename.');
@@ -300,6 +356,29 @@ async function restoreSession(row) {
       body: JSON.stringify({ sessionId: row.sessionId, source }),
     });
     showScriptOutput(result);
+    await loadSessions();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function mergeWithMirror(row) {
+  const label = row.title || row.sessionId.slice(0, 8);
+  const proceed = confirm(
+    `Merge "${label}"?\n\nCombines every transcript line from the mirror and the live copy (deduplicated, put back in chronological order) and writes the result back as the live session — so anything either copy had that the other didn't is recovered. The live file is never left worse off: a timestamped backup of the pre-merge live copy is kept alongside it.\n\nRefused if this session was touched in the last 5 minutes (it may be open right now).`,
+  );
+  if (!proceed) return;
+  try {
+    const result = await fetchJson('/api/sessions/merge-mirror', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId: row.sessionId }),
+    });
+    if (!result.changed) {
+      alert(`Nothing to merge — live already has everything the mirror has (${result.beforeLines} lines).`);
+    } else {
+      alert(`Merged: ${result.beforeLines} → ${result.afterLines} lines (+${result.addedLines} recovered from the mirror).\n\nPre-merge live copy backed up at:\n${result.backupPath}`);
+    }
     await loadSessions();
   } catch (err) {
     alert(err.message);
@@ -377,6 +456,23 @@ function renderSnapshotsPage() {
     `;
     const actionsTd = tr.querySelector('.actions');
     actionsTd.appendChild(actionBtn('search', 'Browse contents', () => browseSnapshot(snap.file)));
+    actionsTd.appendChild(actionBtn('restore', 'Restore every session in this snapshot', async () => {
+      const proceed = confirm(
+        `Restore every session in "${snap.file}" into ~/.claude/projects?\n\nThis never overwrites an existing live file — it only fills in what's missing, and restored files' timestamps are refreshed so Claude Code's cleanup won't immediately delete them again.`,
+      );
+      if (!proceed) return;
+      try {
+        const result = await fetchJson('/api/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file: snap.file }),
+        });
+        showScriptOutput(result);
+        await loadSessions();
+      } catch (err) {
+        alert(err.message);
+      }
+    }));
     actionsTd.appendChild(actionBtn('delete', 'Delete this snapshot', async () => {
       if (!confirm(`Delete the whole snapshot "${snap.file}"? This can't be undone. Sessions that also exist live or in the mirror are unaffected.`)) return;
       try {
@@ -434,6 +530,8 @@ async function browseSnapshot(file) {
 initStaticLabels();
 
 document.getElementById('backupNowBtn').addEventListener('click', runBackup);
+document.getElementById('restoreMirrorBtn').addEventListener('click', runRestoreMirror);
+document.getElementById('newSessionBtn').addEventListener('click', (e) => withLoading(e.currentTarget, 'Opening…', newSession));
 document.getElementById('refreshSessionsBtn').addEventListener('click', (e) => withLoading(e.currentTarget, 'Refreshing…', loadSessions));
 
 document.getElementById('selectAllSessions').addEventListener('change', (e) => {

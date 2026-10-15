@@ -26,7 +26,10 @@
       <div class="card">
         <div class="card-header">
           <h2 id="backupStatusHeading">Backup status</h2>
-          <button id="backupNowBtn" class="btn primary"></button>
+          <div class="inline-form">
+            <button id="restoreMirrorBtn" class="btn"></button>
+            <button id="backupNowBtn" class="btn primary"></button>
+          </div>
         </div>
         <p class="hint" id="backupStatusHint"></p>
         <dl class="status-grid" id="statusGrid"></dl>
@@ -36,7 +39,10 @@
       <div class="card">
         <div class="card-header">
           <h2 id="sessionsHeading">Sessions</h2>
-          <button id="refreshSessionsBtn" class="btn"></button>
+          <div class="header-actions">
+            <button id="newSessionBtn" class="btn"></button>
+            <button id="refreshSessionsBtn" class="btn"></button>
+          </div>
         </div>
         <p class="hint" id="sessionsHint"></p>
         <div class="search-box"></div>

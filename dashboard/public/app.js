@@ -50,6 +50,7 @@ window.CSK.fmtWhen = function fmtWhen(iso) {
 const ICONS = {
   open: '<path d="M7 3H3v10h10v-4M9 3h4v4M13 3 7 9"/>',
   continue: '<path d="M4 3l9 5-9 5V3z"/>',
+  plus: '<path d="M8 3v10M3 8h10"/>',
   restore: '<path d="M3 8a5 5 0 1 1 1.5 3.5M3 8V4M3 8h4"/>',
   rename: '<path d="M11 2l3 3-8 8-3.5.5.5-3.5 8-8z"/>',
   delete: '<path d="M3 4h10M6 4V2.5h4V4M4.5 4l.5 9.5h6l.5-9.5"/>',

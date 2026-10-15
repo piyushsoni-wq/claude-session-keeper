@@ -14,6 +14,7 @@ const summarize = require('../lib/summarize');
 const claudeSettings = require('../lib/claude-settings');
 const automation = require('../lib/automation');
 const backups = require('../lib/backups');
+const merge = require('../lib/merge');
 const unifiedSessions = require('../lib/unified-sessions');
 const { shQuote, asQuote } = require('../lib/shell');
 
@@ -173,7 +174,7 @@ function runInTerminal(cwd, innerCommand) {
 }
 
 function openSessionInTerminal(cwd, sessionId) {
-  return runInTerminal(cwd, `claude --resume ${shQuote(sessionId)}`);
+  return runInTerminal(cwd, `claude --dangerously-skip-permissions --resume ${shQuote(sessionId)}`);
 }
 
 // Confirmed by actually running this (not assumed): passing a multi-
@@ -193,7 +194,7 @@ function continueSessionInTerminal(cwd, brief) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'csk-continue-'));
   const briefFile = path.join(tmpDir, 'brief.txt');
   fs.writeFileSync(briefFile, brief, 'utf8');
-  const innerCommand = `claude "$(cat ${shQuote(briefFile)})" ; rm -rf ${shQuote(tmpDir)}`;
+  const innerCommand = `claude --dangerously-skip-permissions "$(cat ${shQuote(briefFile)})" ; rm -rf ${shQuote(tmpDir)}`;
   return runInTerminal(cwd, innerCommand);
 }
 
@@ -290,6 +291,17 @@ async function handleApi(req, res, pathname, query) {
     return;
   }
 
+  if (pathname === '/api/sessions/merge-mirror' && req.method === 'POST') {
+    const body = await readJsonBody(req);
+    try {
+      const result = merge.mergeSessionIntoLive(backupRoot, String(body.sessionId || ''));
+      sendJson(res, 200, result);
+    } catch (err) {
+      sendError(res, 400, err.message);
+    }
+    return;
+  }
+
   if (pathname === '/api/restore-session' && req.method === 'POST') {
     const body = await readJsonBody(req);
     const sessionId = body.sessionId;
@@ -351,6 +363,25 @@ async function handleApi(req, res, pathname, query) {
     } catch (err) {
       sendError(res, 400, err.message);
     }
+    return;
+  }
+
+  if (pathname === '/api/sessions/new' && req.method === 'POST') {
+    const body = await readJsonBody(req);
+    let cwd = typeof body.cwd === 'string' ? body.cwd.trim() : '';
+    if (cwd === '~' || cwd.startsWith('~/')) cwd = path.join(os.homedir(), cwd.slice(1));
+    if (!cwd || !path.isAbsolute(cwd)) {
+      sendError(res, 400, 'Directory must be an absolute path.');
+      return;
+    }
+    let isDir = false;
+    try { isDir = fs.statSync(cwd).isDirectory(); } catch (e) { /* missing */ }
+    if (!isDir) {
+      sendError(res, 422, `Not an existing directory: ${cwd}`);
+      return;
+    }
+    const result = await runInTerminal(cwd, 'claude --dangerously-skip-permissions');
+    sendJson(res, result.ok ? 200 : 500, result);
     return;
   }
 
